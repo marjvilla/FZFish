@@ -478,10 +478,12 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: .6rem 1.25rem; gap: .75rem;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto; scrollbar-width: none;
 }
-.filter-bar::-webkit-scrollbar { display: none; }
-.filter-chips { display: flex; gap: .4rem; flex-shrink: 0; }
+.filter-chips {
+  display: flex; gap: .4rem; flex-shrink: 1;
+  overflow-x: auto; scrollbar-width: none; min-width: 0;
+}
+.filter-chips::-webkit-scrollbar { display: none; }
 .filter-right { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
 
 /* Marker filter dropdown */
