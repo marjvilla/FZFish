@@ -23,6 +23,7 @@ let pendingPhotoFile = null;
 let editingId       = null;
 let demoMode        = false;
 let scannerContext  = 'search'; // 'search' | 'modal'
+let activeMarkers   = new Set();
 
 // Column order in the Google Sheet (zero-indexed):
 // TankID | Line | Genotype | Age | Count | Location | Markers | Status | Notes | LastUpdated | Photo
@@ -286,27 +287,89 @@ async function uploadPhoto(file) {
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderAll() {
   updateStats();
+  updateMarkerDatalist();
+  updateMarkerDropdown();
   filterFish();
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr + 'T00:00:00');
+  return isNaN(d) ? dateStr : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function allUniqueMarkers() {
+  return [...new Set(fishData.flatMap(f => f.markers || []))].sort();
+}
+
+function updateMarkerDatalist() {
+  const datalist = document.getElementById('markers-datalist');
+  if (!datalist) return;
+  datalist.innerHTML = allUniqueMarkers().map(m => `<option value="${esc(m)}">`).join('');
+}
+
+function updateMarkerDropdown() {
+  const dropdown = document.getElementById('marker-dropdown');
+  if (!dropdown || dropdown.classList.contains('hidden')) return;
+  const markers = allUniqueMarkers();
+  if (markers.length === 0) {
+    dropdown.innerHTML = '<p class="marker-dropdown-empty">No markers in inventory</p>';
+    return;
+  }
+  dropdown.innerHTML = markers.map(m => `
+    <label class="marker-check">
+      <input type="checkbox" value="${esc(m)}" ${activeMarkers.has(m) ? 'checked' : ''}
+        onchange="toggleMarkerFilter('${esc(m)}', this.checked)" />
+      ${esc(m)}
+    </label>
+  `).join('');
+}
+
+window.toggleMarkerDropdown = function() {
+  const dropdown = document.getElementById('marker-dropdown');
+  dropdown.classList.toggle('hidden');
+  if (!dropdown.classList.contains('hidden')) updateMarkerDropdown();
+};
+
+window.toggleMarkerFilter = function(marker, checked) {
+  if (checked) activeMarkers.add(marker); else activeMarkers.delete(marker);
+  const count = activeMarkers.size;
+  const countEl = document.getElementById('marker-filter-count');
+  if (countEl) countEl.textContent = count > 0 ? ` (${count})` : '';
+  const btn = document.getElementById('marker-filter-btn');
+  if (btn) btn.classList.toggle('active', count > 0);
+  filterFish();
+};
+
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('marker-filter-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('marker-dropdown')?.classList.add('hidden');
+  }
+});
+
 function updateStats() {
-  document.getElementById('stat-total').textContent  = fishData.length;
-  document.getElementById('stat-active').textContent = fishData.filter(f => f.status === 'Active').length;
-  document.getElementById('stat-breed').textContent  = fishData.filter(f => f.status === 'Breeding').length;
-  document.getElementById('stat-low').textContent    = fishData.filter(f => f.status === 'Low Stock').length;
+  document.getElementById('stat-total').textContent   = fishData.length;
+  document.getElementById('stat-active').textContent  = fishData.filter(f => f.status === 'Active').length;
+  document.getElementById('stat-breed').textContent   = fishData.filter(f => f.status === 'Breeding').length;
+  document.getElementById('stat-low').textContent     = fishData.filter(f => f.status === 'Low Stock').length;
+  document.getElementById('stat-nursery').textContent = fishData.filter(f => f.status === 'Nursery').length;
 }
 
 window.filterFish = function() {
   const q = (document.getElementById('search-input').value || '').toLowerCase();
   filtered = fishData.filter(f => {
-    const matchFilter = activeFilter === 'all' || f.status === activeFilter;
-    if (!matchFilter) return false;
+    if (activeFilter !== 'all' && f.status !== activeFilter) return false;
+    if (activeMarkers.size > 0) {
+      const fishMarkerSet = new Set(f.markers || []);
+      for (const m of activeMarkers) { if (!fishMarkerSet.has(m)) return false; }
+    }
     if (!q) return true;
     return (
-      f.tankId.toLowerCase().includes(q)  ||
-      f.line.toLowerCase().includes(q)    ||
-      f.genotype.toLowerCase().includes(q)||
-      f.location.toLowerCase().includes(q)||
+      f.tankId.toLowerCase().includes(q)   ||
+      f.line.toLowerCase().includes(q)     ||
+      f.genotype.toLowerCase().includes(q) ||
+      f.location.toLowerCase().includes(q) ||
       (f.markers || []).some(m => m.toLowerCase().includes(q)) ||
       (f.notes || '').toLowerCase().includes(q)
     );
@@ -576,7 +639,7 @@ window.openDrawer = function(id) {
     <div class="drawer-section">
       <h4>Details</h4>
       <div class="drawer-row"><span class="drawer-row-label">Genotype</span><span class="drawer-row-val">${esc(f.genotype || '—')}</span></div>
-      <div class="drawer-row"><span class="drawer-row-label">Age</span><span class="drawer-row-val">${esc(f.age || '—')}</span></div>
+      <div class="drawer-row"><span class="drawer-row-label">Fert. Date</span><span class="drawer-row-val">${formatDate(f.age)}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Count</span><span class="drawer-row-val">${f.count || '—'}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Location</span><span class="drawer-row-val">${esc(f.location || '—')}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Last Updated</span><span class="drawer-row-val">${esc(f.updated || '—')}</span></div>
