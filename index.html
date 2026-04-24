@@ -101,6 +101,7 @@
             <label class="status-opt active-opt"><input type="radio" name="status" value="Active" checked /> Active</label>
             <label class="status-opt breed-opt"><input type="radio" name="status" value="Breeding" /> Breeding</label>
             <label class="status-opt nursery-opt"><input type="radio" name="status" value="Nursery" /> Nursery</label>
+            <label class="status-opt incubator-opt"><input type="radio" name="status" value="Incubator" /> Incubator</label>
             <label class="status-opt low-opt"><input type="radio" name="status" value="Low Stock" /> Low Stock</label>
             <label class="status-opt archive-opt"><input type="radio" name="status" value="Archived" /> Archived</label>
           </div>
@@ -185,6 +186,10 @@
       <span class="stat-num nursery-color" id="stat-nursery">0</span>
       <span class="stat-label">Nursery</span>
     </div>
+    <div class="stat-chip" onclick="setFilter('Incubator')">
+      <span class="stat-num incubator-color" id="stat-incubator">0</span>
+      <span class="stat-label">Incubator</span>
+    </div>
   </div>
 
   <!-- Filter + sort bar -->
@@ -195,6 +200,7 @@
       <button class="chip" data-filter="Breeding" onclick="setFilter('Breeding')">Breeding</button>
       <button class="chip" data-filter="Low Stock" onclick="setFilter('Low Stock')">Low Stock</button>
       <button class="chip" data-filter="Nursery" onclick="setFilter('Nursery')">Nursery</button>
+      <button class="chip" data-filter="Incubator" onclick="setFilter('Incubator')">Incubator</button>
       <button class="chip" data-filter="Archived" onclick="setFilter('Archived')">Archived</button>
     </div>
     <div class="filter-right">

@@ -19,6 +19,7 @@
   --purple:      #bc8cff;
   --stripe:      rgba(255,255,255,.03);
   --nursery:     #38bdf8;
+  --incubator:   #f59e0b;
 
   --radius-sm: 6px;
   --radius:    10px;
@@ -182,6 +183,9 @@ body {
 }
 .close-btn:hover { background: var(--red); color: #fff; }
 
+/* Scanner sits above all other overlays */
+#scan-overlay { z-index: 400; }
+
 /* ── Scanner ── */
 .scan-card {
   position: relative;
@@ -322,7 +326,8 @@ body {
 .active-opt:has(input:checked) { background: rgba(63,185,80,.15); border-color: var(--green); color: var(--green); }
 .breed-opt:has(input:checked)  { background: rgba(88,166,255,.15); border-color: var(--accent); color: var(--accent); }
 .low-opt:has(input:checked)    { background: rgba(210,153,34,.15); border-color: var(--orange); color: var(--orange); }
-.nursery-opt:has(input:checked) { background: rgba(56,189,248,.15);  border-color: var(--nursery);    color: var(--nursery); }
+.nursery-opt:has(input:checked)   { background: rgba(56,189,248,.15);  border-color: var(--nursery);    color: var(--nursery); }
+.incubator-opt:has(input:checked) { background: rgba(245,158,11,.15);  border-color: var(--incubator);  color: var(--incubator); }
 .archive-opt:has(input:checked) { background: rgba(125,133,144,.15); border-color: var(--text-muted); color: var(--text-muted); }
 
 .modal-actions {
@@ -471,7 +476,8 @@ body {
 .active-color   { color: var(--green); }
 .breed-color    { color: var(--accent); }
 .low-color      { color: var(--orange); }
-.nursery-color  { color: var(--nursery); }
+.nursery-color    { color: var(--nursery); }
+.incubator-color  { color: var(--incubator); }
 
 /* Filter bar */
 .filter-bar {
@@ -568,6 +574,7 @@ body {
 .fish-card.status-Active::before      { background: var(--green); }
 .fish-card.status-Breeding::before    { background: var(--accent); }
 .fish-card.status-Nursery::before     { background: var(--nursery); }
+.fish-card.status-Incubator::before   { background: var(--incubator); }
 .fish-card.status-Low\ Stock::before  { background: var(--orange); }
 .fish-card.status-Archived::before    { background: var(--text-dim); }
 
@@ -591,7 +598,8 @@ body {
 }
 .badge-Active     { background: rgba(63,185,80,.15);  color: var(--green); }
 .badge-Breeding   { background: rgba(88,166,255,.15); color: var(--accent); }
-.badge-Nursery    { background: rgba(56,189,248,.15); color: var(--nursery); }
+.badge-Nursery    { background: rgba(56,189,248,.15);  color: var(--nursery); }
+.badge-Incubator  { background: rgba(245,158,11,.15);  color: var(--incubator); }
 .badge-Low\ Stock { background: rgba(210,153,34,.15); color: var(--orange); }
 .badge-Archived   { background: rgba(125,133,144,.1); color: var(--text-dim); }
 

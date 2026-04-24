@@ -22,8 +22,9 @@ let currentPhotoUrl = null;
 let pendingPhotoFile = null;
 let editingId       = null;
 let demoMode        = false;
-let scannerContext  = 'search'; // 'search' | 'modal'
-let activeMarkers   = new Set();
+let scannerContext   = 'search'; // 'search' | 'modal'
+let activeMarkers    = new Set();
+let originalPhotoUrl = null;
 
 // Column order in the Google Sheet (zero-indexed):
 // TankID | Line | Genotype | Age | Count | Location | Markers | Status | Notes | LastUpdated | Photo
@@ -111,7 +112,7 @@ window.signIn = async function() {
       tokenResolvers.push({ resolve, reject });
       tokenClient.requestAccessToken({ prompt: 'select_account' });
     });
-    await Promise.all([fetchSheetGid(), fetchFromSheets()]);
+    await Promise.all([fetchSheetGid(), fetchFromSheets(), ensureChangelogSheet()]);
     showApp();
   } catch(e) {
     btn.disabled = false;
@@ -261,6 +262,41 @@ window.syncSheets = async function() {
   btn.classList.remove('spinning');
 };
 
+// ── Changelog ────────────────────────────────────────────────────────────────
+const CHANGELOG_TAB = 'Changelog';
+
+async function ensureChangelogSheet() {
+  try {
+    const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties`);
+    const json = await res.json();
+    const exists = (json.sheets || []).some(s => s.properties.title === CHANGELOG_TAB);
+    if (!exists) {
+      await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: CHANGELOG_TAB } } }] }),
+      });
+      await authFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${CHANGELOG_TAB}!A1?valueInputOption=USER_ENTERED`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [['Timestamp', 'Action', 'Tank ID', 'Line', 'Details']] }) }
+      );
+    }
+  } catch(e) { console.warn('Changelog setup failed:', e); }
+}
+
+function logChange(action, record, details = '') {
+  if (demoMode) return;
+  const row = [
+    new Date().toISOString(), action,
+    record.tankId || '', record.line || '', details,
+  ];
+  authFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${CHANGELOG_TAB}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [row] }) }
+  ).catch(e => console.warn('Changelog write failed:', e));
+}
+
 // ── Google Drive (photo upload) ──────────────────────────────────────────────
 async function uploadPhoto(file) {
   const metadata = {
@@ -282,6 +318,20 @@ async function uploadPhoto(file) {
   });
 
   return `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
+}
+
+function extractDriveFileId(url) {
+  if (!url) return null;
+  const match = url.match(/[?&]id=([^&]+)/);
+  return match ? match[1] : null;
+}
+
+async function deleteDrivePhoto(photoUrl) {
+  const fileId = extractDriveFileId(photoUrl);
+  if (!fileId || demoMode) return;
+  try {
+    await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: 'DELETE' });
+  } catch(e) { console.warn('Drive photo delete failed:', e); }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -361,7 +411,8 @@ function updateStats() {
   document.getElementById('stat-active').textContent  = fishData.filter(f => f.status === 'Active').length;
   document.getElementById('stat-breed').textContent   = fishData.filter(f => f.status === 'Breeding').length;
   document.getElementById('stat-low').textContent     = fishData.filter(f => f.status === 'Low Stock').length;
-  document.getElementById('stat-nursery').textContent = fishData.filter(f => f.status === 'Nursery').length;
+  document.getElementById('stat-nursery').textContent   = fishData.filter(f => f.status === 'Nursery').length;
+  document.getElementById('stat-incubator').textContent = fishData.filter(f => f.status === 'Incubator').length;
 }
 
 window.filterFish = function() {
@@ -471,6 +522,7 @@ window.openEditModal = function(id) {
   editingId        = id;
   currentMarkers   = [...(f.markers || [])];
   currentPhotoUrl  = f.photoUrl || null;
+  originalPhotoUrl = f.photoUrl || null;
   pendingPhotoFile = null;
   document.getElementById('modal-title').textContent = 'Edit Tank';
   document.getElementById('f-tank-id').value  = f.tankId;
@@ -560,7 +612,11 @@ window.saveFish = async function(e) {
     if (idx !== -1) {
       record._rowIndex = fishData[idx]._rowIndex;
       fishData[idx] = record;
-      if (!demoMode) await updateSheetRow(record, record._rowIndex);
+      if (!demoMode) {
+        await updateSheetRow(record, record._rowIndex);
+        if (originalPhotoUrl && originalPhotoUrl !== photoUrl) deleteDrivePhoto(originalPhotoUrl);
+        logChange('Edited', record, `Status: ${record.status}, Count: ${record.count}, Location: ${record.location}`);
+      }
     }
     showToast('✅ Tank updated');
   } else {
@@ -573,6 +629,7 @@ window.saveFish = async function(e) {
     if (!demoMode) {
       const rowIndex = await appendToSheets(record);
       record._rowIndex = rowIndex || fishData.length + 2;
+      logChange('Added', record, `Status: ${record.status}, Count: ${record.count}, Location: ${record.location}`);
     } else {
       record._rowIndex = fishData.length + 2;
     }
@@ -616,6 +673,8 @@ window.deleteFish = async function(id) {
   if (!demoMode && fish._rowIndex) {
     try {
       await deleteSheetRow(fish._rowIndex);
+      if (fish.photoUrl) deleteDrivePhoto(fish.photoUrl);
+      logChange('Deleted', fish, `Status was: ${fish.status}, Count: ${fish.count}`);
       await fetchFromSheets();
     } catch(e) {
       showToast('❌ Delete failed: ' + e.message);
