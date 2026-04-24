@@ -123,6 +123,22 @@ body {
 }
 .setup-note a { color: var(--accent); }
 
+/* Sign-in area */
+.signin-area { text-align: center; }
+
+.btn-google {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: .75rem;
+  background: #fff; color: #3c4043;
+  border: 1px solid #dadce0; border-radius: var(--radius-sm);
+  padding: .7rem 1.5rem; font-family: var(--font-body);
+  font-size: .95rem; font-weight: 500; cursor: pointer;
+  width: 100%; margin-top: 1.5rem;
+  transition: box-shadow var(--transition), background var(--transition);
+}
+.btn-google:hover  { background: #f8f9fa; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+.btn-google:disabled { opacity: .7; cursor: wait; }
+
 .help-tip {
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 50%;
@@ -313,9 +329,61 @@ body {
 .modal-actions .btn-ghost,
 .modal-actions .btn-primary { width: auto; margin: 0; }
 
+/* Tank ID with inline scan button */
+.input-with-btn { display: flex; gap: .35rem; }
+.input-with-btn input { flex: 1; }
+.btn-scan-inline {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: var(--radius-sm);
+  padding: .4rem .65rem; font-size: .9rem; cursor: pointer; flex-shrink: 0;
+  transition: border-color var(--transition);
+}
+.btn-scan-inline:hover { border-color: var(--accent); }
+
+/* Photo upload */
+.photo-upload-wrap { display: flex; flex-direction: column; gap: .5rem; }
+.photo-upload-btn {
+  display: flex; align-items: center; justify-content: center; gap: .4rem;
+  padding: .65rem 1rem;
+  background: var(--surface2); border: 1.5px dashed var(--border);
+  border-radius: var(--radius-sm); color: var(--text-muted);
+  cursor: pointer; font-size: .88rem;
+  transition: border-color var(--transition), color var(--transition);
+}
+.photo-upload-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.photo-upload-btn input[type="file"] { display: none; }
+.photo-preview-wrap { position: relative; border-radius: var(--radius-sm); overflow: hidden; }
+.photo-preview {
+  width: 100%; max-height: 200px; object-fit: cover;
+  border-radius: var(--radius-sm); display: block;
+}
+.photo-remove-btn {
+  position: absolute; top: .5rem; right: .5rem;
+  background: rgba(0,0,0,.7); color: #fff; border: none;
+  border-radius: var(--radius-sm); padding: .25rem .6rem;
+  font-size: .75rem; cursor: pointer;
+  transition: background var(--transition);
+}
+.photo-remove-btn:hover { background: var(--red); }
+
+/* Card photo thumbnail */
+.card-thumb {
+  width: calc(100% + 2.2rem); margin: -1.1rem -1.1rem .85rem;
+  height: 110px; object-fit: cover;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  display: block;
+}
+
+/* Drawer photo */
+.drawer-photo {
+  width: 100%; border-radius: var(--radius); margin-bottom: 1rem;
+  max-height: 220px; object-fit: cover; display: block;
+}
+
 /* ── App Layout ── */
 .app { display: flex; flex-direction: column; min-height: 100dvh; }
 .hidden { display: none !important; }
+.visually-hidden { display: none; }
 
 /* Header */
 .app-header {
@@ -359,6 +427,14 @@ body {
 .header-right {
   display: flex; align-items: center; gap: .5rem; flex-shrink: 0;
 }
+.btn-signout {
+  background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: .38rem .75rem; font-size: .8rem; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+  transition: border-color var(--transition), color var(--transition);
+}
+.btn-signout:hover { border-color: var(--red); color: var(--red); }
 .icon-btn {
   background: var(--surface2); border: 1px solid var(--border);
   color: var(--text); width: 36px; height: 36px; border-radius: var(--radius-sm);
@@ -599,9 +675,10 @@ body {
 
 /* ── Responsive ── */
 @media (max-width: 600px) {
-  .add-btn  { display: none; }
-  .fab      { display: flex; }
-  .logo-text { display: none; }
+  .add-btn    { display: none; }
+  .fab        { display: flex; }
+  .logo-text  { display: none; }
+  .btn-signout { padding: .3rem .55rem; font-size: .72rem; }
 
   .form-grid { grid-template-columns: 1fr; }
   .form-group.full-width { grid-column: 1; }

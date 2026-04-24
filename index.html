@@ -7,28 +7,29 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
-<!-- ── SETUP OVERLAY ── -->
+<!-- ── SIGN IN OVERLAY ── -->
 <div id="setup-overlay" class="overlay active">
   <div class="overlay-card">
     <div class="logo-mark">🐟</div>
     <h1>ZebraBase</h1>
     <p class="subtitle">Zebrafish Colony Manager</p>
-    <div class="setup-form">
-      <label>Google Sheets ID
-        <span class="help-tip" title="The long string in your Google Sheet URL between /d/ and /edit">?</span>
-      </label>
-      <input id="sheet-id-input" type="text" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" />
-      <label>API Key <span class="help-tip" title="From Google Cloud Console → Credentials → API Key (enable Sheets API)">?</span></label>
-      <input id="api-key-input" type="text" placeholder="AIzaSy..." />
-      <label>Sheet Tab Name</label>
-      <input id="sheet-tab-input" type="text" placeholder="Fish" value="Fish" />
-      <button class="btn-primary" id="connect-btn" onclick="connectSheets()">Connect to Google Sheets</button>
+    <div class="signin-area">
+      <button class="btn-google" id="signin-btn" onclick="signIn()">
+        <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+          <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/>
+          <path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+          <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+        </svg>
+        Sign in with Google
+      </button>
       <div class="divider">or</div>
       <button class="btn-ghost" onclick="useDemoMode()">Use Demo Mode (offline)</button>
-      <p class="setup-note">📋 <a href="SETUP.md" target="_blank">Setup guide</a> — make your sheet public (Viewer) or use an API key.</p>
+      <p class="setup-note">Sign in with a Google account that has access to the lab sheet.</p>
     </div>
   </div>
 </div>
@@ -58,8 +59,11 @@
     <form id="fish-form" onsubmit="saveFish(event)">
       <div class="form-grid">
         <div class="form-group">
-          <label>Tank ID / Barcode *</label>
-          <input id="f-tank-id" type="text" required placeholder="e.g. TK-042" />
+          <label>Tank ID / Barcode</label>
+          <div class="input-with-btn">
+            <input id="f-tank-id" type="text" placeholder="e.g. TK-042 (optional)" />
+            <button type="button" class="btn-scan-inline" onclick="openScanner('modal')" title="Scan barcode">📷</button>
+          </div>
         </div>
         <div class="form-group">
           <label>Line Name *</label>
@@ -99,13 +103,26 @@
           </div>
         </div>
         <div class="form-group full-width">
+          <label>Photo</label>
+          <div class="photo-upload-wrap">
+            <div id="photo-preview-wrap" class="photo-preview-wrap hidden">
+              <img id="f-photo-preview" class="photo-preview" alt="Tank photo" />
+              <button type="button" class="photo-remove-btn" onclick="removePhoto()">✕ Remove</button>
+            </div>
+            <label for="f-photo" class="photo-upload-btn" id="photo-upload-label">
+              📷 Add Photo
+              <input type="file" id="f-photo" accept="image/*" onchange="handlePhotoSelect(this)" />
+            </label>
+          </div>
+        </div>
+        <div class="form-group full-width">
           <label>Notes</label>
           <textarea id="f-notes" rows="2" placeholder="Any notes about this tank…"></textarea>
         </div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
-        <button type="submit" class="btn-primary">Save Tank</button>
+        <button type="submit" class="btn-primary" id="save-btn">Save Tank</button>
       </div>
     </form>
   </div>
@@ -136,9 +153,10 @@
       </div>
     </div>
     <div class="header-right">
-      <button class="icon-btn" onclick="openScanner()" title="Scan barcode">📷</button>
+      <button class="icon-btn" onclick="openScanner('search')" title="Scan barcode">📷</button>
       <button class="icon-btn" onclick="syncSheets()" title="Sync" id="sync-btn">⟳</button>
       <button class="btn-primary add-btn" onclick="openAddModal()">+ Add Tank</button>
+      <button class="btn-signout" id="signout-btn" onclick="signOut()">Sign Out</button>
     </div>
   </header>
 
