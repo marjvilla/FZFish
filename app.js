@@ -268,6 +268,38 @@ window.syncSheets = async function() {
 };
 
 // ── Changelog ────────────────────────────────────────────────────────────────
+function diffRecord(oldRec, newRec) {
+  const fields = [
+    { key: 'line',     label: 'Line'       },
+    { key: 'genotype', label: 'Genotype'   },
+    { key: 'age',      label: 'Fert. Date' },
+    { key: 'count',    label: 'Count'      },
+    { key: 'location', label: 'Location'   },
+    { key: 'status',   label: 'Status'     },
+    { key: 'notes',    label: 'Notes'      },
+  ];
+  const changes = [];
+  fields.forEach(({ key, label }) => {
+    const o = String(oldRec[key] ?? '');
+    const n = String(newRec[key] ?? '');
+    if (o !== n) changes.push(`${label}: "${o}" → "${n}"`);
+  });
+  // Markers
+  const oldPos = (oldRec.markers    || []).join(', ') || '—';
+  const newPos = (newRec.markers    || []).join(', ') || '—';
+  if (oldPos !== newPos) changes.push(`+Markers: [${oldPos}] → [${newPos}]`);
+  const oldNeg = (oldRec.negMarkers || []).join(', ') || '—';
+  const newNeg = (newRec.negMarkers || []).join(', ') || '—';
+  if (oldNeg !== newNeg) changes.push(`−Markers: [${oldNeg}] → [${newNeg}]`);
+  // Photo
+  const hadPhoto = !!oldRec.photoUrl;
+  const hasPhoto = !!newRec.photoUrl;
+  if (!hadPhoto && hasPhoto)                                changes.push('Photo: added');
+  else if (hadPhoto && !hasPhoto)                           changes.push('Photo: removed');
+  else if (hadPhoto && hasPhoto && oldRec.photoUrl !== newRec.photoUrl) changes.push('Photo: replaced');
+  return changes.length ? changes.join(' | ') : 'No changes';
+}
+
 function logChange(action, record, details = '') {
   if (demoMode) return;
   const row = [new Date().toISOString(), action, record.tankId || '', record.line || '', currentUser || '', details];
@@ -306,7 +338,7 @@ async function deleteDrivePhoto(photoUrl) {
 function renderAll() {
   updateStats();
   updateMarkerDatalists();
-  updateFilterSummary();
+  updateFilterSummary(); // also calls updateMiniStats()
   filterFish();
 }
 
@@ -507,21 +539,148 @@ function refreshChips() {
 }
 
 function updateFilterSummary() {
-  const statuses = activeStatuses.size > 0 ? [...activeStatuses].join(', ') : 'All';
-  const markers  = activePosMarkers.size + activeNegMarkers.size;
-  const parts    = [statuses];
-  if (markers > 0) parts.push(`${markers} marker filter${markers > 1 ? 's' : ''}`);
-  const summaryEl = document.getElementById('filter-summary-text');
-  if (summaryEl) summaryEl.textContent = parts.join(' · ');
   const total = activeStatuses.size + activePosMarkers.size + activeNegMarkers.size;
   const countEl = document.getElementById('filter-active-count');
   if (countEl) countEl.textContent = total > 0 ? ` (${total})` : '';
+  updateMiniStats();
 }
 
-// ── Mobile filter panel toggle ────────────────────────────────────────────────
-window.toggleFilterPanel = function() {
-  document.getElementById('filter-panel').classList.toggle('open');
+// ── Mobile filter sheet ───────────────────────────────────────────────────────
+window.openMobileFilters = function() {
+  buildMobileFilterSheet();
+  document.getElementById('mobile-filter-sheet').classList.add('open');
+  document.body.classList.add('modal-open');
 };
+
+window.closeMobileFilters = function() {
+  document.getElementById('mobile-filter-sheet').classList.remove('open');
+  checkScrollLock();
+};
+
+window.clearAllMobileFilters = function() {
+  activeStatuses.clear();
+  activePosMarkers.clear();
+  activeNegMarkers.clear();
+  refreshChips();
+  document.getElementById('pos-filter-count').textContent = '';
+  document.getElementById('neg-filter-count').textContent = '';
+  document.getElementById('pos-filter-btn').classList.remove('active');
+  document.getElementById('neg-filter-btn').classList.remove('active');
+  updateFilterSummary();
+  filterFish();
+  buildMobileFilterSheet();
+};
+
+window.buildMobileFilterSheet = function() {
+  const body = document.getElementById('mobile-filter-body');
+  if (!body) return;
+
+  const statusList = [
+    { key: 'Active',    cls: 'sc-active'    },
+    { key: 'Nursery',   cls: 'sc-nursery'   },
+    { key: 'Incubator', cls: 'sc-incubator' },
+    { key: 'Low Stock', cls: 'sc-low-stock' },
+    { key: 'Archived',  cls: 'sc-archived'  },
+  ];
+  const cnt = s => fishData.filter(f => f.status === s).length;
+  let html = '';
+
+  // ── Status ──
+  html += '<div class="mf-section"><div class="mf-section-title">Status</div>';
+  const allActive = activeStatuses.size === 0;
+  html += `<button class="mf-row${allActive ? ' mf-row-active' : ''}"
+      onclick="clearFilters();buildMobileFilterSheet()">
+    <span class="mf-check">${allActive ? '✓' : ''}</span>
+    <span class="mf-row-label">All tanks</span>
+    <span class="mf-row-count">${fishData.length}</span>
+  </button>`;
+  statusList.forEach(({ key, cls }) => {
+    const on = activeStatuses.has(key);
+    html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+        onclick="setFilter('${key}');buildMobileFilterSheet()">
+      <span class="mf-check">${on ? '✓' : ''}</span>
+      <span class="mf-status-dot ${cls}">●</span>
+      <span class="mf-row-label">${key}</span>
+      <span class="mf-row-count">${cnt(key)}</span>
+    </button>`;
+  });
+  html += '</div>';
+
+  // ── Sort ──
+  const sv  = document.getElementById('sort-select')?.value || 'line';
+  const dir = sortDir === 1 ? '↑' : '↓';
+  html += `<div class="mf-section"><div class="mf-section-title">Sort</div>
+    <div class="mf-sort-row">
+      <select class="mf-sort-select"
+          onchange="document.getElementById('sort-select').value=this.value;sortFish()">
+        <option value="line"    ${sv==='line'    ? 'selected' : ''}>Line</option>
+        <option value="age"     ${sv==='age'     ? 'selected' : ''}>Fert. Date</option>
+        <option value="count"   ${sv==='count'   ? 'selected' : ''}>Count</option>
+        <option value="updated" ${sv==='updated' ? 'selected' : ''}>Last Updated</option>
+      </select>
+      <button class="mf-dir-btn" onclick="toggleSortDir();buildMobileFilterSheet()">${dir}</button>
+    </div>
+  </div>`;
+
+  // ── + Markers ──
+  const pm = uniquePosMarkers();
+  if (pm.length) {
+    html += '<div class="mf-section"><div class="mf-section-title">+ Markers (present)</div>';
+    pm.forEach(m => {
+      const on = activePosMarkers.has(m);
+      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+          onclick="togglePosFilter('${esc(m)}',${!on});buildMobileFilterSheet()">
+        <span class="mf-check">${on ? '✓' : ''}</span>
+        <span class="mf-row-label mf-marker-pos">${esc(m)}</span>
+      </button>`;
+    });
+    html += '</div>';
+  }
+
+  // ── − Markers ──
+  const nm = uniqueNegMarkers();
+  if (nm.length) {
+    html += '<div class="mf-section"><div class="mf-section-title">− Markers (absent)</div>';
+    nm.forEach(m => {
+      const on = activeNegMarkers.has(m);
+      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+          onclick="toggleNegFilter('${esc(m)}',${!on});buildMobileFilterSheet()">
+        <span class="mf-check">${on ? '✓' : ''}</span>
+        <span class="mf-row-label mf-marker-neg">${esc(m)}</span>
+      </button>`;
+    });
+    html += '</div>';
+  }
+
+  body.innerHTML = html;
+};
+
+function updateMiniStats() {
+  const bar = document.getElementById('mini-stats-bar');
+  if (!bar) return;
+  const statusList = [
+    { key: 'Active',    cls: 'sc-active'    },
+    { key: 'Nursery',   cls: 'sc-nursery'   },
+    { key: 'Incubator', cls: 'sc-incubator' },
+    { key: 'Low Stock', cls: 'sc-low-stock' },
+    { key: 'Archived',  cls: 'sc-archived'  },
+  ];
+  let html = `<span class="mini-stat" onclick="clearFilters()">
+    <span class="mini-stat-count">${fishData.length}</span>
+    <span class="mini-stat-label">Total</span>
+  </span>`;
+  statusList.forEach(({ key, cls }) => {
+    const n = fishData.filter(f => f.status === key).length;
+    if (!n) return;
+    const sel = activeStatuses.has(key);
+    html += `<span class="mini-stat${sel ? ' mini-stat-sel' : ''}" onclick="setFilter('${key}')">
+      <span class="mini-stat-dot ${cls}">●</span>
+      <span class="mini-stat-count">${n}</span>
+      <span class="mini-stat-label">${key}</span>
+    </span>`;
+  });
+  bar.innerHTML = html;
+}
 
 // ── Scroll lock ───────────────────────────────────────────────────────────────
 function checkScrollLock() {
@@ -620,12 +779,13 @@ window.saveFish = async function(e) {
   if (editingId) {
     const idx = fishData.findIndex(x => x.id === editingId);
     if (idx !== -1) {
+      const oldRec = { ...fishData[idx] };
       record._rowIndex = fishData[idx]._rowIndex;
       fishData[idx] = record;
       if (!demoMode) {
         await updateSheetRow(record, record._rowIndex);
         if (originalPhotoUrl && originalPhotoUrl !== photoUrl) deleteDrivePhoto(originalPhotoUrl);
-        logChange('Edited', record, `Status: ${record.status}, Count: ${record.count}, Location: ${record.location}`);
+        logChange('Edited', record, diffRecord(oldRec, record));
       }
     }
     showToast('✅ Tank updated');
@@ -633,7 +793,16 @@ window.saveFish = async function(e) {
     if (!demoMode) {
       const rowIndex = await appendToSheets(record);
       record._rowIndex = rowIndex || fishData.length + 2;
-      logChange('Added', record, `Status: ${record.status}, Count: ${record.count}, Location: ${record.location}`);
+      const addDetails = [
+        `Line: ${record.line}`,
+        `Status: ${record.status}`,
+        record.count   ? `Count: ${record.count}`        : null,
+        record.location? `Location: ${record.location}`  : null,
+        (record.markers    ||[]).length ? `+Markers: [${record.markers.join(', ')}]`    : null,
+        (record.negMarkers ||[]).length ? `−Markers: [${record.negMarkers.join(', ')}]` : null,
+        record.photoUrl ? 'Photo: added' : null,
+      ].filter(Boolean).join(' | ');
+      logChange('Added', record, addDetails);
     } else {
       record._rowIndex = fishData.length + 2;
     }
@@ -685,7 +854,16 @@ window.deleteFish = async function(id) {
     try {
       await deleteSheetRow(fish._rowIndex);
       if (fish.photoUrl) deleteDrivePhoto(fish.photoUrl);
-      logChange('Deleted', fish, `Status was: ${fish.status}, Count: ${fish.count}`);
+      const delDetails = [
+        `Line: ${fish.line}`,
+        `Status: ${fish.status}`,
+        fish.count    ? `Count: ${fish.count}`        : null,
+        fish.location ? `Location: ${fish.location}`  : null,
+        (fish.markers    ||[]).length ? `+Markers: [${fish.markers.join(', ')}]`    : null,
+        (fish.negMarkers ||[]).length ? `−Markers: [${fish.negMarkers.join(', ')}]` : null,
+        fish.photoUrl ? 'Had photo' : null,
+      ].filter(Boolean).join(' | ');
+      logChange('Deleted', fish, delDetails);
       await fetchFromSheets();
     } catch(e) { showToast('❌ Delete failed: ' + e.message); return; }
   } else {
@@ -810,6 +988,6 @@ function showToast(msg) {
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); }
-  if (e.key==='Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); document.getElementById('filter-panel')?.classList.remove('open'); }
+  if (e.key==='Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); }
   if ((e.metaKey||e.ctrlKey) && e.key==='n') { e.preventDefault(); openAddModal(); }
 });

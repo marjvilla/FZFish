@@ -172,15 +172,31 @@
     </div>
   </header>
 
-  <!-- Mobile filter toggle row -->
+  <!-- Mobile: mini stat counts + filter button (hidden on desktop) -->
   <div class="filter-toggle-bar" id="filter-toggle-bar">
-    <span class="filter-summary-text" id="filter-summary-text">All tanks</span>
-    <button class="filter-toggle-btn" onclick="toggleFilterPanel()">
+    <div class="mini-stats-bar" id="mini-stats-bar"></div>
+    <button class="filter-toggle-btn" onclick="openMobileFilters()">
       ⚙ Filters<span id="filter-active-count"></span>
     </button>
   </div>
 
-  <!-- Filter panel (stats + chips — collapsible on mobile) -->
+  <!-- Mobile filter bottom sheet -->
+  <div id="mobile-filter-sheet" class="mobile-filter-sheet">
+    <div class="mobile-filter-backdrop" onclick="closeMobileFilters()"></div>
+    <div class="mobile-filter-inner">
+      <div class="mobile-filter-header">
+        <span class="mobile-filter-title">Filters &amp; Sort</span>
+        <button class="mf-close-btn" onclick="closeMobileFilters()">✕</button>
+      </div>
+      <div class="mobile-filter-body" id="mobile-filter-body"></div>
+      <div class="mobile-filter-footer">
+        <button class="btn-ghost mf-btn" onclick="clearAllMobileFilters()">Clear All</button>
+        <button class="btn-primary mf-btn" onclick="closeMobileFilters()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter panel (stats + chips — desktop always visible, hidden on mobile) -->
   <div class="filter-panel" id="filter-panel">
 
     <!-- Stats bar -->

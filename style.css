@@ -492,14 +492,10 @@ body.modal-open { overflow: hidden; }
 /* Mobile filter toggle bar — hidden on desktop */
 .filter-toggle-bar {
   display: none;
-  align-items: center; justify-content: space-between;
-  padding: .5rem 1rem;
+  align-items: center; gap: .5rem;
+  padding: .45rem .75rem .45rem 1rem;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-}
-.filter-summary-text {
-  font-size: .82rem; color: var(--text-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .filter-toggle-btn {
   background: var(--surface2); border: 1px solid var(--border);
@@ -509,6 +505,131 @@ body.modal-open { overflow: hidden; }
   transition: border-color var(--transition), color var(--transition);
 }
 .filter-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Mini stats bar inside toggle bar */
+.mini-stats-bar {
+  display: flex; align-items: center; gap: .4rem;
+  flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none;
+}
+.mini-stats-bar::-webkit-scrollbar { display: none; }
+.mini-stat {
+  display: inline-flex; align-items: center; gap: .2rem;
+  padding: .2rem .45rem; border-radius: var(--radius-sm);
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: background var(--transition);
+}
+.mini-stat:hover { background: var(--surface2); }
+.mini-stat-sel  { background: var(--accent-glow); }
+.mini-stat-dot  { font-size: .55rem; line-height: 1; }
+.mini-stat-count { font-family: var(--font-mono); font-size: .82rem; font-weight: 500; color: var(--text); }
+.mini-stat-label { font-size: .72rem; color: var(--text-muted); }
+
+/* Status dot colors */
+.sc-active    { color: var(--green); }
+.sc-nursery   { color: var(--nursery); }
+.sc-incubator { color: var(--incubator); }
+.sc-low-stock { color: var(--orange); }
+.sc-archived  { color: var(--text-dim); }
+
+/* ── Mobile Filter Bottom Sheet ── */
+.mobile-filter-sheet {
+  position: fixed; inset: 0; z-index: 350;
+  pointer-events: none;
+}
+.mobile-filter-sheet.open { pointer-events: all; }
+
+.mobile-filter-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+  opacity: 0; transition: opacity .25s ease;
+}
+.mobile-filter-sheet.open .mobile-filter-backdrop { opacity: 1; }
+
+.mobile-filter-inner {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: var(--surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-top: 1px solid var(--border);
+  max-height: 85dvh; display: flex; flex-direction: column;
+  transform: translateY(100%);
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+}
+.mobile-filter-sheet.open .mobile-filter-inner { transform: translateY(0); }
+
+.mobile-filter-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 1.25rem .75rem; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.mobile-filter-title {
+  font-family: var(--font-head); font-weight: 700; font-size: 1.05rem;
+}
+.mf-close-btn {
+  background: var(--surface3); border: none; color: var(--text-muted);
+  width: 28px; height: 28px; border-radius: 50%; font-size: .85rem;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition);
+}
+.mf-close-btn:hover { background: var(--red); color: #fff; }
+
+.mobile-filter-body { flex: 1; overflow-y: auto; }
+
+.mobile-filter-footer {
+  display: flex; gap: .75rem; padding: .75rem 1.25rem;
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.mf-btn { flex: 1; margin: 0; width: auto; }
+
+/* Sheet sections */
+.mf-section { border-bottom: 1px solid var(--border); }
+.mf-section:last-child { border-bottom: none; }
+.mf-section-title {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--text-dim); padding: .75rem 1.25rem .35rem;
+  font-weight: 600;
+}
+.mf-row {
+  display: flex; align-items: center; gap: .75rem;
+  width: 100%; background: none; border: none; color: var(--text);
+  padding: .75rem 1.25rem; font-size: .95rem; cursor: pointer; text-align: left;
+  transition: background var(--transition);
+}
+.mf-row:hover    { background: var(--surface2); }
+.mf-row.mf-row-active { background: var(--accent-glow); }
+.mf-check {
+  width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
+  border: 1.5px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; color: transparent;
+  transition: all var(--transition);
+}
+.mf-row.mf-row-active .mf-check {
+  background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700;
+}
+.mf-status-dot  { font-size: .65rem; flex-shrink: 0; }
+.mf-row-label   { flex: 1; font-family: var(--font-body); }
+.mf-row-count   { font-family: var(--font-mono); font-size: .82rem; color: var(--text-muted); }
+.mf-marker-pos  { font-family: var(--font-mono); color: var(--purple); }
+.mf-marker-neg  { font-family: var(--font-mono); color: var(--red); }
+
+.mf-sort-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .5rem 1.25rem .75rem;
+}
+.mf-sort-select {
+  flex: 1; padding: .55rem .75rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font-size: .9rem;
+}
+.mf-sort-select:focus { outline: none; border-color: var(--accent); }
+.mf-dir-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: var(--radius-sm);
+  width: 38px; height: 38px; font-size: 1rem; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color var(--transition), color var(--transition);
+}
+.mf-dir-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Filter bar */
 .filter-bar {
@@ -798,17 +919,9 @@ body.modal-open { overflow: hidden; }
   .modal-actions .btn-ghost,
   .modal-actions .btn-primary { width: 100%; }
 
-  /* Collapsible filter panel on mobile */
+  /* Show mini-stat toggle bar, hide full desktop filter panel */
   .filter-toggle-bar { display: flex; }
-  .filter-panel {
-    display: none; flex-direction: column;
-    border-bottom: 1px solid var(--border);
-  }
-  .filter-panel.open { display: flex; }
-
-  /* Remove double border when panel is open */
-  .filter-panel.open .stats-bar { border-bottom: 1px solid var(--border); }
-  .filter-panel.open .filter-bar { border-bottom: none; }
+  .filter-panel { display: none; }
 }
 
 @media (max-width: 400px) {
