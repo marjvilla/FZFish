@@ -59,13 +59,6 @@
     <form id="fish-form" onsubmit="saveFish(event)">
       <div class="form-grid">
         <div class="form-group">
-          <label>Tank ID / Barcode</label>
-          <div class="input-with-btn">
-            <input id="f-tank-id" type="text" placeholder="e.g. TK-042 (optional)" />
-            <button type="button" class="btn-scan-inline" onclick="openScanner('modal')" title="Scan barcode">📷</button>
-          </div>
-        </div>
-        <div class="form-group">
           <label>Line Name *</label>
           <input id="f-line" type="text" required placeholder="e.g. Tg(fli1:EGFP)" />
         </div>
@@ -81,7 +74,7 @@
           <label>Count</label>
           <input id="f-count" type="number" min="0" placeholder="# of fish" />
         </div>
-        <div class="form-group">
+        <div class="form-group full-width">
           <label>Rack / Location</label>
           <input id="f-location" type="text" placeholder="e.g. Rack 3A, Shelf 2" />
         </div>
@@ -109,10 +102,10 @@
           <label>Status</label>
           <div class="status-picker">
             <label class="status-opt active-opt"><input type="radio" name="status" value="Active" checked /> Active</label>
-            <label class="status-opt breed-opt"><input type="radio" name="status" value="Breeding" /> Breeding</label>
             <label class="status-opt nursery-opt"><input type="radio" name="status" value="Nursery" /> Nursery</label>
             <label class="status-opt incubator-opt"><input type="radio" name="status" value="Incubator" /> Incubator</label>
             <label class="status-opt low-opt"><input type="radio" name="status" value="Low Stock" /> Low Stock</label>
+            <label class="status-opt breed-opt"><input type="radio" name="status" value="Breeding" /> Breeding</label>
             <label class="status-opt archive-opt"><input type="radio" name="status" value="Archived" /> Archived</label>
           </div>
         </div>
@@ -151,6 +144,11 @@
 </div>
 <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
 
+<!-- ── PHOTO LIGHTBOX ── -->
+<div id="photo-lightbox" class="overlay" onclick="closeLightbox()">
+  <img id="lightbox-img" class="lightbox-img" alt="Tank photo" />
+</div>
+
 <!-- ── MAIN APP ── -->
 <div id="app" class="app hidden">
 
@@ -167,70 +165,88 @@
       </div>
     </div>
     <div class="header-right">
-      <button class="icon-btn" onclick="openScanner('search')" title="Scan barcode">📷</button>
+      <button class="icon-btn" onclick="openScanner()" title="Scan barcode">📷</button>
       <button class="icon-btn" onclick="syncSheets()" title="Sync" id="sync-btn">⟳</button>
       <button class="btn-primary add-btn" onclick="openAddModal()">+ Add Tank</button>
       <button class="btn-signout" id="signout-btn" onclick="signOut()">Sign Out</button>
     </div>
   </header>
 
-  <!-- Stats bar -->
-  <div class="stats-bar">
-    <div class="stat-chip" onclick="setFilter('all')">
-      <span class="stat-num" id="stat-total">0</span>
-      <span class="stat-label">Total Tanks</span>
-    </div>
-    <div class="stat-chip" onclick="setFilter('Active')">
-      <span class="stat-num active-color" id="stat-active">0</span>
-      <span class="stat-label">Active</span>
-    </div>
-    <div class="stat-chip" onclick="setFilter('Breeding')">
-      <span class="stat-num breed-color" id="stat-breed">0</span>
-      <span class="stat-label">Breeding</span>
-    </div>
-    <div class="stat-chip" onclick="setFilter('Low Stock')">
-      <span class="stat-num low-color" id="stat-low">0</span>
-      <span class="stat-label">Low Stock</span>
-    </div>
-    <div class="stat-chip" onclick="setFilter('Nursery')">
-      <span class="stat-num nursery-color" id="stat-nursery">0</span>
-      <span class="stat-label">Nursery</span>
-    </div>
-    <div class="stat-chip" onclick="setFilter('Incubator')">
-      <span class="stat-num incubator-color" id="stat-incubator">0</span>
-      <span class="stat-label">Incubator</span>
-    </div>
+  <!-- Mobile filter toggle row -->
+  <div class="filter-toggle-bar" id="filter-toggle-bar">
+    <span class="filter-summary-text" id="filter-summary-text">All tanks</span>
+    <button class="filter-toggle-btn" onclick="toggleFilterPanel()">
+      ⚙ Filters<span id="filter-active-count"></span>
+    </button>
   </div>
 
-  <!-- Filter + sort bar -->
-  <div class="filter-bar">
-    <div class="filter-chips" id="filter-chips">
-      <button class="chip active" data-filter="all" onclick="setFilter('all')">All</button>
-      <button class="chip" data-filter="Active" onclick="setFilter('Active')">Active</button>
-      <button class="chip" data-filter="Breeding" onclick="setFilter('Breeding')">Breeding</button>
-      <button class="chip" data-filter="Low Stock" onclick="setFilter('Low Stock')">Low Stock</button>
-      <button class="chip" data-filter="Nursery" onclick="setFilter('Nursery')">Nursery</button>
-      <button class="chip" data-filter="Incubator" onclick="setFilter('Incubator')">Incubator</button>
-      <button class="chip" data-filter="Archived" onclick="setFilter('Archived')">Archived</button>
-    </div>
-    <div class="filter-right">
-      <div class="marker-filter-wrap" id="marker-filter-wrap">
-        <button class="marker-filter-btn" id="marker-filter-btn" onclick="toggleMarkerDropdown()">
-          Markers<span id="marker-filter-count"></span> ▾
-        </button>
-        <div id="marker-dropdown" class="marker-dropdown hidden"></div>
+  <!-- Filter panel (stats + chips — collapsible on mobile) -->
+  <div class="filter-panel" id="filter-panel">
+
+    <!-- Stats bar -->
+    <div class="stats-bar">
+      <div class="stat-chip" onclick="clearFilters()">
+        <span class="stat-num" id="stat-total">0</span>
+        <span class="stat-label">Total</span>
       </div>
-      <select id="sort-select" onchange="sortFish()" class="sort-select">
-        <option value="tank">Tank ID</option>
-        <option value="line">Line</option>
-        <option value="age">Fert. Date</option>
-        <option value="count">Count</option>
-        <option value="updated">Last Updated</option>
-      </select>
-      <button class="sort-dir-btn" id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle sort direction">↑</button>
+      <div class="stat-chip" onclick="setFilter('Active')">
+        <span class="stat-num active-color" id="stat-active">0</span>
+        <span class="stat-label">Active</span>
+      </div>
+      <div class="stat-chip" onclick="setFilter('Nursery')">
+        <span class="stat-num nursery-color" id="stat-nursery">0</span>
+        <span class="stat-label">Nursery</span>
+      </div>
+      <div class="stat-chip" onclick="setFilter('Incubator')">
+        <span class="stat-num incubator-color" id="stat-incubator">0</span>
+        <span class="stat-label">Incubator</span>
+      </div>
+      <div class="stat-chip" onclick="setFilter('Low Stock')">
+        <span class="stat-num low-color" id="stat-low">0</span>
+        <span class="stat-label">Low Stock</span>
+      </div>
+      <div class="stat-chip" onclick="setFilter('Archived')">
+        <span class="stat-num" id="stat-archived">0</span>
+        <span class="stat-label">Archived</span>
+      </div>
     </div>
-  </div>
 
+    <!-- Filter + sort bar -->
+    <div class="filter-bar">
+      <div class="filter-chips" id="filter-chips">
+        <button class="chip active" data-filter="all" onclick="clearFilters()">All</button>
+        <button class="chip" data-filter="Active" onclick="setFilter('Active')">Active</button>
+        <button class="chip" data-filter="Nursery" onclick="setFilter('Nursery')">Nursery</button>
+        <button class="chip" data-filter="Incubator" onclick="setFilter('Incubator')">Incubator</button>
+        <button class="chip" data-filter="Low Stock" onclick="setFilter('Low Stock')">Low Stock</button>
+        <button class="chip" data-filter="Archived" onclick="setFilter('Archived')">Archived</button>
+      </div>
+      <div class="filter-right">
+        <!-- Positive marker filter -->
+        <div class="marker-filter-wrap" id="pos-filter-wrap">
+          <button class="marker-filter-btn" id="pos-filter-btn" onclick="togglePosDropdown()">
+            +Markers<span id="pos-filter-count"></span> ▾
+          </button>
+          <div id="pos-dropdown" class="marker-dropdown hidden"></div>
+        </div>
+        <!-- Negative marker filter -->
+        <div class="marker-filter-wrap" id="neg-filter-wrap">
+          <button class="marker-filter-btn neg-filter-btn" id="neg-filter-btn" onclick="toggleNegDropdown()">
+            −Markers<span id="neg-filter-count"></span> ▾
+          </button>
+          <div id="neg-dropdown" class="marker-dropdown hidden"></div>
+        </div>
+        <select id="sort-select" onchange="sortFish()" class="sort-select">
+          <option value="line">Line</option>
+          <option value="age">Fert. Date</option>
+          <option value="count">Count</option>
+          <option value="updated">Last Updated</option>
+        </select>
+        <button class="sort-dir-btn" id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle sort direction">↑</button>
+      </div>
+    </div>
+
+  </div><!-- /filter-panel -->
 
   <!-- Fish grid -->
   <main class="fish-grid" id="fish-grid">
@@ -243,11 +259,6 @@
   <!-- FAB for mobile -->
   <button class="fab" onclick="openAddModal()">+</button>
 
-</div>
-
-<!-- Photo lightbox -->
-<div id="photo-lightbox" class="overlay" onclick="closeLightbox()">
-  <img id="lightbox-img" class="lightbox-img" alt="Tank photo" />
 </div>
 
 <!-- Toast -->

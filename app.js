@@ -8,59 +8,80 @@ const DRIVE_FOLDER  = '1VTpNTlB-JMLPZNKzgm0IIXCRkk9Agzf7';
 const SCOPES        = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file openid email';
 
 // ── State ────────────────────────────────────────────────────────────────────
-let tokenClient      = null;
-let accessToken      = null;
-let tokenExpiry      = 0;
-let tokenResolvers   = [];
-let sheetGid         = 0;
-let currentUser      = '';
+let tokenClient       = null;
+let accessToken       = null;
+let tokenExpiry       = 0;
+let tokenResolvers    = [];
+let sheetGid          = 0;
+let currentUser       = '';
 
-let fishData         = [];
-let filtered         = [];
-let activeFilter     = 'all';
-let currentMarkers   = [];   // positive
-let currentNegMarkers = [];  // negative
-let currentPhotoUrl  = null;
-let originalPhotoUrl = null;
-let pendingPhotoFile = null;
-let editingId        = null;
-let demoMode         = false;
-let scannerContext   = 'search';
-let activeMarkers    = new Set();
-let sortDir          = 1;  // 1 = asc, -1 = desc
+let fishData          = [];
+let filtered          = [];
+let activeStatuses    = new Set();   // empty = All
+let activePosMarkers  = new Set();
+let activeNegMarkers  = new Set();
+let currentMarkers    = [];
+let currentNegMarkers = [];
+let currentPhotoUrl   = null;
+let originalPhotoUrl  = null;
+let pendingPhotoFile  = null;
+let editingId         = null;
+let demoMode          = false;
+let scannerRunning    = false;
+let sortDir           = -1;  // -1 = desc (newest first), 1 = asc
 
-// Column index in the Google Sheet (zero-based):
-// A  B     C         D    E      F         G               H       I      J        K      L
-// ID Line  Genotype  Date Count  Location  PosMarkers      Status  Notes  Updated  Photo  NegMarkers
+// A  B     C         D    E      F         G            H       I      J        K      L
+// ID Line  Genotype  Date Count  Location  PosMarkers   Status  Notes  Updated  Photo  NegMarkers
 const COL = {
-  tankId:     0, line:      1, genotype:   2,
-  age:        3, count:     4, location:   5,
-  markers:    6, status:    7, notes:      8,
-  updated:    9, photo:    10, negMarkers: 11,
+  tankId:     0, line:     1, genotype:   2,
+  age:        3, count:    4, location:   5,
+  markers:    6, status:   7, notes:      8,
+  updated:    9, photo:   10, negMarkers: 11,
 };
 
 // ── Demo data ────────────────────────────────────────────────────────────────
 const DEMO = [
-  { tankId:'TK-001', line:'Tg(fli1:EGFP)',     genotype:'+;+',  age:'2025-01-10', count:12, location:'Rack 1A, Shelf 2', markers:['EGFP','fli1'],   negMarkers:[],         status:'Active',    notes:'Healthy, spawning well', photoUrl:'', updated:'2025-04-20' },
-  { tankId:'TK-002', line:'Tg(gata1:DsRed)',   genotype:'+;-',  age:'2025-02-01', count:8,  location:'Rack 1A, Shelf 3', markers:['DsRed','gata1'], negMarkers:['fli1'],   status:'Breeding',  notes:'Set up breeding pair',   photoUrl:'', updated:'2025-04-22' },
-  { tankId:'TK-003', line:'casper',            genotype:'?;?',  age:'2024-12-05', count:3,  location:'Rack 2B, Shelf 1', markers:[],               negMarkers:[],         status:'Low Stock', notes:'Need to expand',          photoUrl:'', updated:'2025-04-15' },
-  { tankId:'TK-004', line:'Tg(mpeg1:mCherry)', genotype:'+;+',  age:'2025-03-15', count:20, location:'Rack 2B, Shelf 4', markers:['mCherry','mpeg1'],negMarkers:['DsRed'], status:'Active',    notes:'',                       photoUrl:'', updated:'2025-04-21' },
-  { tankId:'TK-005', line:'AB wild-type',      genotype:'-;-',  age:'2024-10-01', count:6,  location:'Rack 3C, Shelf 1', markers:[],               negMarkers:[],         status:'Archived',  notes:'Retired breeders',        photoUrl:'', updated:'2025-03-10' },
-  { tankId:'TK-006', line:'Tg(huc:GCaMP6s)',  genotype:'+;+',  age:'2025-03-01', count:15, location:'Rack 1B, Shelf 1', markers:['GCaMP6s','huc'], negMarkers:[],         status:'Nursery',   notes:'Imaging stock',           photoUrl:'', updated:'2025-04-23' },
+  { tankId:'demo-1', line:'Tg(fli1:EGFP)',     genotype:'+;+', age:'2025-01-10', count:12, location:'Rack 1A, Shelf 2', markers:['EGFP','fli1'],    negMarkers:[],        status:'Active',    notes:'Healthy, spawning well', photoUrl:'', updated:'2025-04-20' },
+  { tankId:'demo-2', line:'Tg(gata1:DsRed)',   genotype:'+;-', age:'2025-02-01', count:8,  location:'Rack 1A, Shelf 3', markers:['DsRed','gata1'],  negMarkers:['fli1'],  status:'Breeding',  notes:'Set up breeding pair',   photoUrl:'', updated:'2025-04-22' },
+  { tankId:'demo-3', line:'casper',            genotype:'?;?', age:'2024-12-05', count:3,  location:'Rack 2B, Shelf 1', markers:[],                 negMarkers:[],        status:'Low Stock', notes:'Need to expand',          photoUrl:'', updated:'2025-04-15' },
+  { tankId:'demo-4', line:'Tg(mpeg1:mCherry)', genotype:'+;+', age:'2025-03-15', count:20, location:'Rack 2B, Shelf 4', markers:['mCherry','mpeg1'], negMarkers:['DsRed'], status:'Active',    notes:'',                       photoUrl:'', updated:'2025-04-21' },
+  { tankId:'demo-5', line:'AB wild-type',      genotype:'-;-', age:'2024-10-01', count:6,  location:'Rack 3C, Shelf 1', markers:[],                 negMarkers:[],        status:'Archived',  notes:'Retired breeders',        photoUrl:'', updated:'2025-03-10' },
+  { tankId:'demo-6', line:'Tg(huc:GCaMP6s)',  genotype:'+;+', age:'2025-03-01', count:15, location:'Rack 1B, Shelf 1', markers:['GCaMP6s','huc'],  negMarkers:[],        status:'Nursery',   notes:'Imaging stock',           photoUrl:'', updated:'2025-04-23' },
 ];
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   if (localStorage.getItem('zebrabase-demo') === 'true') { useDemoMode(); return; }
 
+  // Restore session from sessionStorage if token still valid
+  const storedToken  = sessionStorage.getItem('zb-token');
+  const storedExpiry = parseInt(sessionStorage.getItem('zb-expiry') || '0');
+  if (storedToken && Date.now() < storedExpiry) {
+    accessToken  = storedToken;
+    tokenExpiry  = storedExpiry;
+    currentUser  = sessionStorage.getItem('zb-user') || '';
+    waitForGIS(true);
+    return;
+  }
+
+  waitForGIS(false);
+});
+
+function waitForGIS(autoConnect) {
   const poll = setInterval(() => {
     if (window.google?.accounts?.oauth2) {
       clearInterval(poll);
       initTokenClient();
-      if (localStorage.getItem('zb-was-signed-in') === 'true') attemptSilentAuth();
+      if (autoConnect) {
+        Promise.all([fetchSheetGid(), fetchFromSheets()]).then(showApp).catch(() => {
+          // Token may have expired silently; clear and show sign-in
+          accessToken = null;
+          sessionStorage.clear();
+        });
+      }
     }
   }, 100);
-});
+}
 
 function initTokenClient() {
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -71,32 +92,20 @@ function initTokenClient() {
         tokenResolvers.forEach(r => r.reject(new Error(response.error)));
         tokenResolvers = [];
         const btn = document.getElementById('signin-btn');
-        if (btn) { btn.disabled = false; btn.innerHTML = googleBtnContent(); }
+        if (btn) { btn.disabled = false; btn.innerHTML = googleBtnHTML(); }
         return;
       }
       accessToken = response.access_token;
       tokenExpiry  = Date.now() + (response.expires_in - 60) * 1000;
+      sessionStorage.setItem('zb-token',  accessToken);
+      sessionStorage.setItem('zb-expiry', String(tokenExpiry));
       tokenResolvers.forEach(r => r.resolve());
       tokenResolvers = [];
     },
   });
 }
 
-function attemptSilentAuth() {
-  const btn = document.getElementById('signin-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Reconnecting…'; }
-  new Promise((resolve, reject) => {
-    tokenResolvers.push({ resolve, reject });
-    tokenClient.requestAccessToken({ prompt: '' });
-  }).then(async () => {
-    await Promise.all([fetchSheetGid(), fetchFromSheets(), fetchUserInfo()]);
-    showApp();
-  }).catch(() => {
-    if (btn) { btn.disabled = false; btn.innerHTML = googleBtnContent(); }
-  });
-}
-
-function googleBtnContent() {
+function googleBtnHTML() {
   return `<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
     <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
     <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/>
@@ -124,22 +133,21 @@ window.signIn = async function() {
       tokenClient.requestAccessToken({ prompt: 'select_account' });
     });
     await Promise.all([fetchSheetGid(), fetchFromSheets(), fetchUserInfo()]);
-    localStorage.setItem('zb-was-signed-in', 'true');
     showApp();
   } catch(e) {
-    btn.disabled = false; btn.innerHTML = googleBtnContent();
+    btn.disabled = false; btn.innerHTML = googleBtnHTML();
   }
 };
 
 window.signOut = function() {
   if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
   accessToken = null; tokenExpiry = 0; fishData = []; demoMode = false; currentUser = '';
-  localStorage.removeItem('zb-was-signed-in');
+  sessionStorage.clear();
   localStorage.removeItem('zebrabase-demo');
   document.getElementById('app').classList.add('hidden');
   document.getElementById('setup-overlay').classList.add('active');
   const btn = document.getElementById('signin-btn');
-  btn.disabled = false; btn.innerHTML = googleBtnContent();
+  btn.disabled = false; btn.innerHTML = googleBtnHTML();
 };
 
 window.useDemoMode = function() {
@@ -163,6 +171,7 @@ async function fetchUserInfo() {
     const res  = await authFetch('https://www.googleapis.com/oauth2/v3/userinfo');
     const json = await res.json();
     currentUser = json.email || json.name || '';
+    sessionStorage.setItem('zb-user', currentUser);
   } catch(e) { currentUser = ''; }
 }
 
@@ -172,10 +181,7 @@ async function authFetch(url, options = {}) {
     showToast('⚠️ Session expired — please sign in again.');
     signOut(); throw new Error('No valid token');
   }
-  return fetch(url, {
-    ...options,
-    headers: { ...options.headers, 'Authorization': `Bearer ${accessToken}` },
-  });
+  return fetch(url, { ...options, headers: { ...options.headers, 'Authorization': `Bearer ${accessToken}` } });
 }
 
 // ── Google Sheets ─────────────────────────────────────────────────────────────
@@ -185,14 +191,14 @@ async function fetchSheetGid() {
     const json = await res.json();
     const sheet = (json.sheets || []).find(s => s.properties.title === TAB_NAME);
     sheetGid = sheet?.properties?.sheetId ?? 0;
-  } catch(e) { console.warn('Could not fetch sheet GID:', e.message); }
+  } catch(e) { console.warn('fetchSheetGid:', e.message); }
 }
 
 async function fetchFromSheets() {
   try {
     const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(TAB_NAME)}`);
     const json = await res.json();
-    if (json.error) { showToast('❌ Sheets error: ' + json.error.message); return false; }
+    if (json.error) { showToast('❌ ' + json.error.message); return false; }
     const rows = json.values || [];
     fishData = rows.slice(1).map((r, i) => ({
       id:          r[COL.tankId]     || `row-${i+2}`,
@@ -202,8 +208,8 @@ async function fetchFromSheets() {
       age:         r[COL.age]        || '',
       count:       parseInt(r[COL.count]) || 0,
       location:    r[COL.location]   || '',
-      markers:     r[COL.markers]    ? r[COL.markers].split(',').map(m => m.trim()).filter(Boolean) : [],
-      negMarkers:  r[COL.negMarkers] ? r[COL.negMarkers].split(',').map(m => m.trim()).filter(Boolean) : [],
+      markers:     parseList(r[COL.markers]),
+      negMarkers:  parseList(r[COL.negMarkers]),
       status:      r[COL.status]     || 'Active',
       notes:       r[COL.notes]      || '',
       updated:     r[COL.updated]    || '',
@@ -212,11 +218,15 @@ async function fetchFromSheets() {
     }));
     showToast('✅ Synced ' + fishData.length + ' tanks');
     return true;
-  } catch(e) { showToast('❌ Network error: ' + e.message); return false; }
+  } catch(e) { showToast('❌ ' + e.message); return false; }
+}
+
+function parseList(val) {
+  return val ? String(val).split(',').map(m => m.trim()).filter(Boolean) : [];
 }
 
 async function appendToSheets(record) {
-  const res  = await authFetch(
+  const res   = await authFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(TAB_NAME)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [recordToRow(record)] }) }
   );
@@ -226,27 +236,22 @@ async function appendToSheets(record) {
 }
 
 async function updateSheetRow(record, rowIndex) {
-  const range = `${TAB_NAME}!A${rowIndex}`;
   await authFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(TAB_NAME + '!A' + rowIndex)}?valueInputOption=RAW`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [recordToRow(record)] }) }
   );
 }
 
 async function deleteSheetRow(rowIndex) {
-  await authFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`,
-    {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: sheetGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex } } }] }),
-    }
-  );
+  await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: sheetGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex } } }] }),
+  });
 }
 
 function recordToRow(r) {
   return [
-    r.tankId, r.line, r.genotype, r.age,
-    r.count, r.location,
+    r.tankId, r.line, r.genotype, r.age, r.count, r.location,
     (r.markers    || []).join(', '),
     r.status, r.notes,
     new Date().toISOString().slice(0, 10),
@@ -258,15 +263,8 @@ function recordToRow(r) {
 window.syncSheets = async function() {
   const btn = document.getElementById('sync-btn');
   btn.classList.add('spinning');
-  if (demoMode) {
-    await new Promise(r => setTimeout(r, 600));
-    btn.classList.remove('spinning');
-    showToast('🐠 Demo mode — nothing to sync');
-    return;
-  }
-  await fetchFromSheets();
-  renderAll();
-  btn.classList.remove('spinning');
+  if (demoMode) { await new Promise(r => setTimeout(r, 600)); btn.classList.remove('spinning'); showToast('🐠 Demo mode — nothing to sync'); return; }
+  await fetchFromSheets(); renderAll(); btn.classList.remove('spinning');
 };
 
 // ── Changelog ────────────────────────────────────────────────────────────────
@@ -276,7 +274,7 @@ function logChange(action, record, details = '') {
   authFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/changelog:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [row] }) }
-  ).catch(e => console.warn('Changelog write failed:', e));
+  ).catch(e => console.warn('Changelog:', e));
 }
 
 // ── Google Drive ──────────────────────────────────────────────────────────────
@@ -285,8 +283,7 @@ async function uploadPhoto(file) {
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
-  const uploadRes   = await authFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form });
-  const { id: fileId } = await uploadRes.json();
+  const { id: fileId } = await (await authFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form })).json();
   await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role: 'reader', type: 'anyone' }),
@@ -295,51 +292,58 @@ async function uploadPhoto(file) {
 }
 
 function extractDriveFileId(url) {
-  const match = (url || '').match(/[?&]id=([^&]+)/);
-  return match ? match[1] : null;
+  const m = (url || '').match(/[?&]id=([^&]+)/);
+  return m ? m[1] : null;
 }
 
 async function deleteDrivePhoto(photoUrl) {
-  const fileId = extractDriveFileId(photoUrl);
-  if (!fileId || demoMode) return;
-  try { await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: 'DELETE' }); }
-  catch(e) { console.warn('Drive photo delete failed:', e); }
+  const id = extractDriveFileId(photoUrl);
+  if (!id || demoMode) return;
+  try { await authFetch(`https://www.googleapis.com/drive/v3/files/${id}`, { method: 'DELETE' }); } catch(e) {}
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderAll() {
   updateStats();
-  updateMarkerDatalist();
-  updateMarkerDropdown();
+  updateMarkerDatalists();
+  updateFilterSummary();
   filterFish();
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr + 'T00:00:00');
-  return isNaN(d) ? dateStr : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+function formatDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  return isNaN(dt) ? d : dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function updateStats() {
+  const count = s => fishData.filter(f => f.status === s).length;
   document.getElementById('stat-total').textContent     = fishData.length;
-  document.getElementById('stat-active').textContent    = fishData.filter(f => f.status === 'Active').length;
-  document.getElementById('stat-breed').textContent     = fishData.filter(f => f.status === 'Breeding').length;
-  document.getElementById('stat-low').textContent       = fishData.filter(f => f.status === 'Low Stock').length;
-  document.getElementById('stat-nursery').textContent   = fishData.filter(f => f.status === 'Nursery').length;
-  document.getElementById('stat-incubator').textContent = fishData.filter(f => f.status === 'Incubator').length;
+  document.getElementById('stat-active').textContent    = count('Active');
+  document.getElementById('stat-nursery').textContent   = count('Nursery');
+  document.getElementById('stat-incubator').textContent = count('Incubator');
+  document.getElementById('stat-low').textContent       = count('Low Stock');
+  document.getElementById('stat-archived').textContent  = count('Archived');
 }
 
 window.filterFish = function() {
   const q = (document.getElementById('search-input').value || '').toLowerCase();
   filtered = fishData.filter(f => {
-    if (activeFilter !== 'all' && f.status !== activeFilter) return false;
-    if (activeMarkers.size > 0) {
-      const all = new Set([...(f.markers || []), ...(f.negMarkers || [])]);
-      for (const m of activeMarkers) { if (!all.has(m)) return false; }
+    if (activeStatuses.size > 0 && !activeStatuses.has(f.status)) return false;
+    if (activePosMarkers.size > 0) {
+      const s = new Set(f.markers || []);
+      for (const m of activePosMarkers) { if (!s.has(m)) return false; }
+    }
+    if (activeNegMarkers.size > 0) {
+      const s = new Set(f.negMarkers || []);
+      for (const m of activeNegMarkers) { if (!s.has(m)) return false; }
     }
     if (!q) return true;
     return (
-      f.tankId.toLowerCase().includes(q)    ||
       f.line.toLowerCase().includes(q)      ||
       f.genotype.toLowerCase().includes(q)  ||
       f.location.toLowerCase().includes(q)  ||
@@ -355,7 +359,6 @@ window.sortFish = function() {
   const s = document.getElementById('sort-select').value;
   filtered.sort((a, b) => {
     let cmp = 0;
-    if (s === 'tank')    cmp = a.tankId.localeCompare(b.tankId);
     if (s === 'line')    cmp = a.line.localeCompare(b.line);
     if (s === 'age')     cmp = (a.age || '').localeCompare(b.age || '');
     if (s === 'count')   cmp = (a.count || 0) - (b.count || 0);
@@ -380,31 +383,30 @@ function renderGrid() {
   empty.style.display = 'none';
 
   filtered.forEach((f, idx) => {
-    const card = document.createElement('div');
+    const card    = document.createElement('div');
     card.className = `fish-card status-${f.status}`;
     card.style.animationDelay = `${idx * 0.04}s`;
 
-    const posHtml = (f.markers    || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
-    const negHtml = (f.negMarkers || []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join('');
-    const thumbHtml = f.photoUrl ? `<img class="card-thumb" src="${esc(f.photoUrl)}" alt="Tank photo" loading="lazy" />` : '';
+    const posHtml   = (f.markers    || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
+    const negHtml   = (f.negMarkers || []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join('');
+    const thumbHtml = f.photoUrl ? `<img class="card-thumb" src="${esc(f.photoUrl)}" loading="lazy" />` : '';
 
     card.innerHTML = `
       ${thumbHtml}
       <div class="card-header">
-        <span class="tank-id">${esc(f.tankId || '—')}</span>
+        <span class="fert-date">${f.age ? formatDate(f.age) : ''}</span>
         <span class="status-badge badge-${f.status}">${esc(f.status)}</span>
       </div>
       <div class="line-name">${esc(f.line)}</div>
       ${f.genotype ? `<div class="genotype">${esc(f.genotype)}</div>` : ''}
       <div class="card-meta">
-        ${f.age      ? `<span class="meta-item"><span class="meta-icon">📅</span>${formatDate(f.age)}</span>` : ''}
         ${f.count    ? `<span class="meta-item"><span class="meta-icon">🐟</span>${f.count}</span>` : ''}
         ${f.location ? `<span class="meta-item"><span class="meta-icon">📍</span>${esc(f.location)}</span>` : ''}
       </div>
       ${(posHtml || negHtml) ? `<div class="card-markers">${posHtml}${negHtml}</div>` : ''}
       <div class="card-actions">
-        <button class="card-btn" onclick="event.stopPropagation(); openEditModal('${esc(f.id)}')">Edit</button>
-        <button class="card-btn danger" onclick="event.stopPropagation(); deleteFish('${esc(f.id)}')">Delete</button>
+        <button class="card-btn" onclick="event.stopPropagation();openEditModal('${esc(f.id)}')">Edit</button>
+        <button class="card-btn danger" onclick="event.stopPropagation();deleteFish('${esc(f.id)}')">Delete</button>
       </div>
     `;
     card.addEventListener('click', () => openDrawer(f.id));
@@ -412,83 +414,126 @@ function renderGrid() {
   });
 }
 
-function esc(str) {
-  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// ── Marker datalists & dropdowns ──────────────────────────────────────────────
+function uniquePosMarkers() { return [...new Set(fishData.flatMap(f => f.markers    || []))].sort(); }
+function uniqueNegMarkers() { return [...new Set(fishData.flatMap(f => f.negMarkers || []))].sort(); }
+
+function updateMarkerDatalists() {
+  const fill = (id, items) => { const el = document.getElementById(id); if (el) el.innerHTML = items.map(m => `<option value="${esc(m)}">`).join(''); };
+  fill('markers-datalist',     uniquePosMarkers());
+  fill('neg-markers-datalist', uniqueNegMarkers());
 }
 
-// ── Marker autocomplete & dropdown ────────────────────────────────────────────
-function allUniqueMarkers() {
-  return [...new Set(fishData.flatMap(f => [...(f.markers || []), ...(f.negMarkers || [])]))].sort();
-}
-
-function updateMarkerDatalist() {
-  const dl = document.getElementById('markers-datalist');
-  if (dl) dl.innerHTML = allUniqueMarkers().map(m => `<option value="${esc(m)}">`).join('');
-  const ndl = document.getElementById('neg-markers-datalist');
-  if (ndl) ndl.innerHTML = allUniqueMarkers().map(m => `<option value="${esc(m)}">`).join('');
-}
-
-function updateMarkerDropdown() {
-  const dropdown = document.getElementById('marker-dropdown');
-  if (!dropdown || dropdown.classList.contains('hidden')) return;
-  const markers = allUniqueMarkers();
-  if (markers.length === 0) { dropdown.innerHTML = '<p class="marker-dropdown-empty">No markers in inventory</p>'; return; }
-  dropdown.innerHTML = markers.map(m => `
+function buildDropdownHtml(markers, activeSet, toggleFn) {
+  if (!markers.length) return '<p class="marker-dropdown-empty">No markers in inventory</p>';
+  return markers.map(m => `
     <label class="marker-check">
-      <input type="checkbox" value="${esc(m)}" ${activeMarkers.has(m) ? 'checked' : ''}
-        onchange="toggleMarkerFilter('${esc(m)}', this.checked)" />
+      <input type="checkbox" value="${esc(m)}" ${activeSet.has(m) ? 'checked' : ''}
+        onchange="${toggleFn}('${esc(m)}', this.checked)" />
       ${esc(m)}
-    </label>
-  `).join('');
+    </label>`).join('');
 }
 
-window.toggleMarkerDropdown = function() {
-  const dropdown = document.getElementById('marker-dropdown');
-  const btn      = document.getElementById('marker-filter-btn');
-  if (!dropdown.classList.contains('hidden')) { dropdown.classList.add('hidden'); return; }
-  const rect = btn.getBoundingClientRect();
+function positionDropdown(dropdown, btnId) {
+  const rect = document.getElementById(btnId).getBoundingClientRect();
   dropdown.style.top   = (rect.bottom + 4) + 'px';
   dropdown.style.right = (window.innerWidth - rect.right) + 'px';
-  dropdown.classList.remove('hidden');
-  updateMarkerDropdown();
+}
+
+window.togglePosDropdown = function() {
+  const dd = document.getElementById('pos-dropdown');
+  if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
+  document.getElementById('neg-dropdown').classList.add('hidden');
+  positionDropdown(dd, 'pos-filter-btn');
+  dd.innerHTML = buildDropdownHtml(uniquePosMarkers(), activePosMarkers, 'togglePosFilter');
+  dd.classList.remove('hidden');
 };
 
-window.toggleMarkerFilter = function(marker, checked) {
-  if (checked) activeMarkers.add(marker); else activeMarkers.delete(marker);
-  const count   = activeMarkers.size;
-  const countEl = document.getElementById('marker-filter-count');
-  if (countEl) countEl.textContent = count > 0 ? ` (${count})` : '';
-  document.getElementById('marker-filter-btn')?.classList.toggle('active', count > 0);
-  filterFish();
+window.toggleNegDropdown = function() {
+  const dd = document.getElementById('neg-dropdown');
+  if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
+  document.getElementById('pos-dropdown').classList.add('hidden');
+  positionDropdown(dd, 'neg-filter-btn');
+  dd.innerHTML = buildDropdownHtml(uniqueNegMarkers(), activeNegMarkers, 'toggleNegFilter');
+  dd.classList.remove('hidden');
 };
 
+window.togglePosFilter = function(m, checked) {
+  if (checked) activePosMarkers.add(m); else activePosMarkers.delete(m);
+  const c = activePosMarkers.size;
+  document.getElementById('pos-filter-count').textContent = c > 0 ? ` (${c})` : '';
+  document.getElementById('pos-filter-btn').classList.toggle('active', c > 0);
+  updateFilterSummary(); filterFish();
+};
+
+window.toggleNegFilter = function(m, checked) {
+  if (checked) activeNegMarkers.add(m); else activeNegMarkers.delete(m);
+  const c = activeNegMarkers.size;
+  document.getElementById('neg-filter-count').textContent = c > 0 ? ` (${c})` : '';
+  document.getElementById('neg-filter-btn').classList.toggle('active', c > 0);
+  updateFilterSummary(); filterFish();
+};
+
+// Close dropdowns on outside click
 document.addEventListener('click', e => {
-  const wrap = document.getElementById('marker-filter-wrap');
-  if (wrap && !wrap.contains(e.target)) document.getElementById('marker-dropdown')?.classList.add('hidden');
+  ['pos-filter-wrap','neg-filter-wrap'].forEach(id => {
+    const wrap = document.getElementById(id);
+    const ddId = id === 'pos-filter-wrap' ? 'pos-dropdown' : 'neg-dropdown';
+    if (wrap && !wrap.contains(e.target)) document.getElementById(ddId)?.classList.add('hidden');
+  });
 });
 
-// ── Filter chips ──────────────────────────────────────────────────────────────
-window.setFilter = function(val) {
-  activeFilter = val;
-  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.filter === val));
+// ── Filter chips (multi-select status) ───────────────────────────────────────
+window.setFilter = function(status) {
+  if (activeStatuses.has(status)) activeStatuses.delete(status);
+  else activeStatuses.add(status);
+  refreshChips();
+  updateFilterSummary();
   filterFish();
+};
+
+window.clearFilters = function() {
+  activeStatuses.clear();
+  refreshChips();
+  updateFilterSummary();
+  filterFish();
+};
+
+function refreshChips() {
+  document.querySelectorAll('.chip').forEach(c => {
+    if (c.dataset.filter === 'all') c.classList.toggle('active', activeStatuses.size === 0);
+    else c.classList.toggle('active', activeStatuses.has(c.dataset.filter));
+  });
+}
+
+function updateFilterSummary() {
+  const statuses = activeStatuses.size > 0 ? [...activeStatuses].join(', ') : 'All';
+  const markers  = activePosMarkers.size + activeNegMarkers.size;
+  const parts    = [statuses];
+  if (markers > 0) parts.push(`${markers} marker filter${markers > 1 ? 's' : ''}`);
+  const summaryEl = document.getElementById('filter-summary-text');
+  if (summaryEl) summaryEl.textContent = parts.join(' · ');
+  const total = activeStatuses.size + activePosMarkers.size + activeNegMarkers.size;
+  const countEl = document.getElementById('filter-active-count');
+  if (countEl) countEl.textContent = total > 0 ? ` (${total})` : '';
+}
+
+// ── Mobile filter panel toggle ────────────────────────────────────────────────
+window.toggleFilterPanel = function() {
+  document.getElementById('filter-panel').classList.toggle('open');
 };
 
 // ── Scroll lock ───────────────────────────────────────────────────────────────
 function checkScrollLock() {
-  const modalOpen  = document.querySelector('.overlay.active') !== null;
+  const anyOverlay = document.querySelector('.overlay.active') !== null;
   const drawerOpen = document.getElementById('detail-drawer')?.classList.contains('open');
-  document.body.classList.toggle('modal-open', modalOpen || drawerOpen);
+  document.body.classList.toggle('modal-open', anyOverlay || !!drawerOpen);
 }
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
 window.openAddModal = function() {
-  editingId         = null;
-  currentMarkers    = [];
-  currentNegMarkers = [];
-  currentPhotoUrl   = null;
-  originalPhotoUrl  = null;
-  pendingPhotoFile  = null;
+  editingId = null; currentMarkers = []; currentNegMarkers = [];
+  currentPhotoUrl = null; originalPhotoUrl = null; pendingPhotoFile = null;
   document.getElementById('modal-title').textContent = 'Add Tank';
   document.getElementById('fish-form').reset();
   document.getElementById('markers-container').innerHTML     = '';
@@ -502,24 +547,18 @@ window.openAddModal = function() {
 window.openEditModal = function(id) {
   const f = fishData.find(x => x.id === id);
   if (!f) return;
-  editingId         = id;
-  currentMarkers    = [...(f.markers    || [])];
-  currentNegMarkers = [...(f.negMarkers || [])];
-  currentPhotoUrl   = f.photoUrl || null;
-  originalPhotoUrl  = f.photoUrl || null;
-  pendingPhotoFile  = null;
-  document.getElementById('modal-title').textContent  = 'Edit Tank';
-  document.getElementById('f-tank-id').value   = f.tankId;
-  document.getElementById('f-line').value      = f.line;
-  document.getElementById('f-genotype').value  = f.genotype || '';
-  document.getElementById('f-age').value       = f.age || '';
-  document.getElementById('f-count').value     = f.count || '';
-  document.getElementById('f-location').value  = f.location || '';
-  document.getElementById('f-notes').value     = f.notes || '';
-  const statusInput = document.querySelector(`input[name="status"][value="${f.status}"]`);
-  if (statusInput) statusInput.checked = true;
-  renderMarkerTags();
-  renderNegMarkerTags();
+  editingId = id; currentMarkers = [...(f.markers || [])]; currentNegMarkers = [...(f.negMarkers || [])];
+  currentPhotoUrl = f.photoUrl || null; originalPhotoUrl = f.photoUrl || null; pendingPhotoFile = null;
+  document.getElementById('modal-title').textContent = 'Edit Tank';
+  document.getElementById('f-line').value     = f.line;
+  document.getElementById('f-genotype').value = f.genotype || '';
+  document.getElementById('f-age').value      = f.age || '';
+  document.getElementById('f-count').value    = f.count || '';
+  document.getElementById('f-location').value = f.location || '';
+  document.getElementById('f-notes').value    = f.notes || '';
+  const si = document.querySelector(`input[name="status"][value="${f.status}"]`);
+  if (si) si.checked = true;
+  renderMarkerTags(); renderNegMarkerTags();
   resetPhotoUI();
   if (currentPhotoUrl) showPhotoPreview(currentPhotoUrl);
   document.getElementById('fish-modal').classList.add('active');
@@ -531,14 +570,16 @@ window.closeModal = function() {
   checkScrollLock();
 };
 
-// Photo helpers
+// Photo
 function resetPhotoUI() {
   document.getElementById('f-photo').value = '';
   document.getElementById('photo-preview-wrap').classList.add('hidden');
   document.getElementById('photo-upload-label').classList.remove('hidden');
 }
 function showPhotoPreview(url) {
-  document.getElementById('f-photo-preview').src = url;
+  const img = document.getElementById('f-photo-preview');
+  img.src     = url;
+  img.onclick = () => openLightbox(url);
   document.getElementById('photo-preview-wrap').classList.remove('hidden');
   document.getElementById('photo-upload-label').classList.add('hidden');
 }
@@ -548,9 +589,7 @@ window.handlePhotoSelect = function(input) {
   pendingPhotoFile = file;
   showPhotoPreview(URL.createObjectURL(file));
 };
-window.removePhoto = function() {
-  currentPhotoUrl = null; pendingPhotoFile = null; resetPhotoUI();
-};
+window.removePhoto = function() { currentPhotoUrl = null; pendingPhotoFile = null; resetPhotoUI(); };
 
 window.saveFish = async function(e) {
   e.preventDefault();
@@ -559,32 +598,24 @@ window.saveFish = async function(e) {
 
   let photoUrl = currentPhotoUrl || '';
   if (pendingPhotoFile && !demoMode) {
-    try {
-      showToast('📤 Uploading photo…');
-      photoUrl = await uploadPhoto(pendingPhotoFile);
-    } catch(err) {
-      showToast('❌ Photo upload failed: ' + err.message);
-      saveBtn.disabled = false; saveBtn.textContent = 'Save Tank'; return;
-    }
+    try { showToast('📤 Uploading photo…'); photoUrl = await uploadPhoto(pendingPhotoFile); }
+    catch(err) { showToast('❌ Photo upload failed: ' + err.message); saveBtn.disabled = false; saveBtn.textContent = 'Save Tank'; return; }
   }
 
-  const tankIdRaw = document.getElementById('f-tank-id').value.trim();
   const record = {
-    tankId:      tankIdRaw,
-    line:        document.getElementById('f-line').value.trim(),
-    genotype:    document.getElementById('f-genotype').value.trim(),
-    age:         document.getElementById('f-age').value.trim(),
-    count:       parseInt(document.getElementById('f-count').value) || 0,
-    location:    document.getElementById('f-location').value.trim(),
-    markers:     [...currentMarkers],
-    negMarkers:  [...currentNegMarkers],
-    status:      document.querySelector('input[name="status"]:checked').value,
-    notes:       document.getElementById('f-notes').value.trim(),
-    photoUrl,
-    updated:     new Date().toISOString().slice(0, 10),
+    tankId:     editingId ? (fishData.find(x => x.id === editingId)?.tankId || editingId) : `tank-${Date.now()}`,
+    line:       document.getElementById('f-line').value.trim(),
+    genotype:   document.getElementById('f-genotype').value.trim(),
+    age:        document.getElementById('f-age').value.trim(),
+    count:      parseInt(document.getElementById('f-count').value) || 0,
+    location:   document.getElementById('f-location').value.trim(),
+    markers:    [...currentMarkers],
+    negMarkers: [...currentNegMarkers],
+    status:     document.querySelector('input[name="status"]:checked').value,
+    notes:      document.getElementById('f-notes').value.trim(),
+    photoUrl, updated: new Date().toISOString().slice(0, 10),
   };
-  record.id = record.tankId || `tank-${Date.now()}`;
-  if (!record.tankId) record.tankId = record.id;
+  record.id = record.tankId;
 
   if (editingId) {
     const idx = fishData.findIndex(x => x.id === editingId);
@@ -599,10 +630,6 @@ window.saveFish = async function(e) {
     }
     showToast('✅ Tank updated');
   } else {
-    if (tankIdRaw && fishData.find(x => x.tankId === tankIdRaw)) {
-      showToast('⚠️ Tank ID already exists');
-      saveBtn.disabled = false; saveBtn.textContent = 'Save Tank'; return;
-    }
     if (!demoMode) {
       const rowIndex = await appendToSheets(record);
       record._rowIndex = rowIndex || fishData.length + 2;
@@ -615,35 +642,32 @@ window.saveFish = async function(e) {
   }
 
   saveBtn.disabled = false; saveBtn.textContent = 'Save Tank';
-  closeModal();
-  renderAll();
+  closeModal(); renderAll();
 };
 
 // Positive markers
 window.addMarkerTag = function() {
-  const input = document.getElementById('marker-input');
-  const val   = input.value.trim();
-  if (val && !currentMarkers.includes(val)) { currentMarkers.push(val); renderMarkerTags(); }
-  input.value = ''; input.focus();
+  const i = document.getElementById('marker-input');
+  const v = i.value.trim();
+  if (v && !currentMarkers.includes(v)) { currentMarkers.push(v); renderMarkerTags(); }
+  i.value = ''; i.focus();
 };
 function renderMarkerTags() {
   document.getElementById('markers-container').innerHTML = currentMarkers.map((m, i) =>
-    `<span class="marker-tag">${esc(m)}<button type="button" onclick="removeMarker(${i})">×</button></span>`
-  ).join('');
+    `<span class="marker-tag">${esc(m)}<button type="button" onclick="removeMarker(${i})">×</button></span>`).join('');
 }
 window.removeMarker = function(i) { currentMarkers.splice(i, 1); renderMarkerTags(); };
 
 // Negative markers
 window.addNegMarkerTag = function() {
-  const input = document.getElementById('neg-marker-input');
-  const val   = input.value.trim();
-  if (val && !currentNegMarkers.includes(val)) { currentNegMarkers.push(val); renderNegMarkerTags(); }
-  input.value = ''; input.focus();
+  const i = document.getElementById('neg-marker-input');
+  const v = i.value.trim();
+  if (v && !currentNegMarkers.includes(v)) { currentNegMarkers.push(v); renderNegMarkerTags(); }
+  i.value = ''; i.focus();
 };
 function renderNegMarkerTags() {
   document.getElementById('neg-markers-container').innerHTML = currentNegMarkers.map((m, i) =>
-    `<span class="marker-tag marker-tag-neg">${esc(m)}<button type="button" onclick="removeNegMarker(${i})">×</button></span>`
-  ).join('');
+    `<span class="marker-tag marker-tag-neg">${esc(m)}<button type="button" onclick="removeNegMarker(${i})">×</button></span>`).join('');
 }
 window.removeNegMarker = function(i) { currentNegMarkers.splice(i, 1); renderNegMarkerTags(); };
 
@@ -668,21 +692,19 @@ window.deleteFish = async function(id) {
     fishData = fishData.filter(f => f.id !== id);
   }
   showToast('🗑 Tank deleted');
-  closeDrawer();
-  renderAll();
+  closeDrawer(); renderAll();
 };
 
 // ── Detail Drawer ─────────────────────────────────────────────────────────────
 window.openDrawer = function(id) {
   const f = fishData.find(x => x.id === id);
   if (!f) return;
-  const posHtml = (f.markers    || []).length ? (f.markers   || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join(' ')        : '<span style="color:var(--text-dim)">None</span>';
+  const posHtml = (f.markers    || []).length ? (f.markers   || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join(' ')           : '<span style="color:var(--text-dim)">None</span>';
   const negHtml = (f.negMarkers || []).length ? (f.negMarkers|| []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join(' ') : '<span style="color:var(--text-dim)">None</span>';
-  const photoHtml = f.photoUrl ? `<img class="drawer-photo" src="${esc(f.photoUrl)}" alt="Tank photo" onclick="openLightbox('${esc(f.photoUrl)}')" title="Click to enlarge" />` : '';
+  const photoHtml = f.photoUrl ? `<img class="drawer-photo" src="${esc(f.photoUrl)}" onclick="openLightbox('${esc(f.photoUrl)}')" title="Click to enlarge" />` : '';
 
   document.getElementById('drawer-content').innerHTML = `
     ${photoHtml}
-    <div class="drawer-fish-id">${esc(f.tankId || '—')}</div>
     <div class="drawer-line">${esc(f.line)}</div>
     <span class="status-badge badge-${f.status}" style="margin-top:.25rem;display:inline-block">${esc(f.status)}</span>
     <div class="drawer-section">
@@ -718,7 +740,7 @@ window.closeDrawer = function() {
   checkScrollLock();
 };
 
-// ── Photo lightbox ────────────────────────────────────────────────────────────
+// ── Lightbox ──────────────────────────────────────────────────────────────────
 window.openLightbox = function(src) {
   document.getElementById('lightbox-img').src = src;
   document.getElementById('photo-lightbox').classList.add('active');
@@ -730,29 +752,20 @@ window.closeLightbox = function() {
 };
 
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
-let scannerRunning = false;
-
-window.openScanner = function(context = 'search') {
-  scannerContext = context;
+window.openScanner = function() {
   document.getElementById('scan-overlay').classList.add('active');
-  document.getElementById('scan-status').textContent  = 'Initializing camera…';
-  document.getElementById('manual-barcode').value     = '';
-  checkScrollLock();
-  startQuagga();
+  document.getElementById('scan-status').textContent = 'Initializing camera…';
+  document.getElementById('manual-barcode').value    = '';
+  checkScrollLock(); startQuagga();
 };
-
 window.closeScanner = function() {
   document.getElementById('scan-overlay').classList.remove('active');
-  stopQuagga();
-  checkScrollLock();
+  stopQuagga(); checkScrollLock();
 };
-
 function startQuagga() {
-  if (typeof Quagga === 'undefined') {
-    document.getElementById('scan-status').textContent = 'Scanner not available. Use manual entry.'; return;
-  }
+  if (typeof Quagga === 'undefined') { document.getElementById('scan-status').textContent = 'Scanner not available. Use manual entry.'; return; }
   Quagga.init({
-    inputStream: { name: 'Live', type: 'LiveStream', target: document.querySelector('#interactive'), constraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
+    inputStream: { name:'Live', type:'LiveStream', target: document.querySelector('#interactive'), constraints: { facingMode:'environment', width:{ideal:1280}, height:{ideal:720} } },
     decoder:     { readers: ['code_128_reader','ean_reader','ean_8_reader','code_39_reader','upc_reader'] },
     locate: true,
   }, err => {
@@ -764,32 +777,26 @@ function startQuagga() {
     stopQuagga();
     document.getElementById('scan-overlay').classList.remove('active');
     checkScrollLock();
-    handleBarcode(result.codeResult.code);
+    const code  = result.codeResult.code;
+    const found = fishData.find(f => f.tankId === code);
+    showToast(`📷 Scanned: ${code}`);
+    if (found) openDrawer(found.id);
+    else { openAddModal(); showToast(`No tank found for "${code}"`); }
   });
 }
-
 function stopQuagga() {
-  if (scannerRunning && typeof Quagga !== 'undefined') {
-    try { Quagga.stop(); } catch(_){}
-    scannerRunning = false;
-  }
+  if (scannerRunning && typeof Quagga !== 'undefined') { try { Quagga.stop(); } catch(_){} scannerRunning = false; }
 }
-
 window.manualBarcode = function() {
-  const val = document.getElementById('manual-barcode').value.trim();
-  if (!val) return;
+  const v = document.getElementById('manual-barcode').value.trim();
+  if (!v) return;
   closeScanner();
-  handleBarcode(val);
+  const found = fishData.find(f => f.tankId === v);
+  showToast(`📷 Scanned: ${v}`);
+  if (found) openDrawer(found.id);
+  else { openAddModal(); showToast(`No tank found for "${v}"`); }
 };
 document.addEventListener('keydown', e => { if (e.target.id === 'manual-barcode' && e.key === 'Enter') manualBarcode(); });
-
-function handleBarcode(code) {
-  showToast(`📷 Scanned: ${code}`);
-  if (scannerContext === 'modal') { document.getElementById('f-tank-id').value = code; return; }
-  const found = fishData.find(f => f.tankId === code);
-  if (found) { openDrawer(found.id); }
-  else { openAddModal(); document.getElementById('f-tank-id').value = code; showToast(`No tank found for "${code}" — pre-filled form`); }
-}
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -802,7 +809,7 @@ function showToast(msg) {
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); document.getElementById('search-input')?.focus(); }
-  if (e.key === 'Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); }
-  if ((e.metaKey || e.ctrlKey) && e.key === 'n') { e.preventDefault(); openAddModal(); }
+  if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); }
+  if (e.key==='Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); document.getElementById('filter-panel')?.classList.remove('open'); }
+  if ((e.metaKey||e.ctrlKey) && e.key==='n') { e.preventDefault(); openAddModal(); }
 });

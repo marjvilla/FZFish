@@ -489,6 +489,27 @@ body.modal-open { overflow: hidden; }
 .nursery-color    { color: var(--nursery); }
 .incubator-color  { color: var(--incubator); }
 
+/* Mobile filter toggle bar — hidden on desktop */
+.filter-toggle-bar {
+  display: none;
+  align-items: center; justify-content: space-between;
+  padding: .5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.filter-summary-text {
+  font-size: .82rem; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.filter-toggle-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: var(--radius-sm);
+  padding: .35rem .75rem; font-size: .8rem; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+  transition: border-color var(--transition), color var(--transition);
+}
+.filter-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Filter bar */
 .filter-bar {
   display: flex; align-items: center; justify-content: space-between;
@@ -512,6 +533,9 @@ body.modal-open { overflow: hidden; }
 }
 .marker-filter-btn:hover,
 .marker-filter-btn.active { border-color: var(--accent); color: var(--accent); }
+.neg-filter-btn { color: var(--text-muted); }
+.neg-filter-btn:hover,
+.neg-filter-btn.active { border-color: var(--red); color: var(--red); }
 .marker-dropdown {
   position: fixed;
   background: var(--surface); border: 1px solid var(--border);
@@ -609,6 +633,10 @@ body.modal-open { overflow: hidden; }
 .tank-id {
   font-family: var(--font-mono); font-size: .85rem; font-weight: 500;
   color: var(--text-muted);
+}
+.fert-date {
+  font-family: var(--font-mono); font-size: .78rem;
+  color: var(--text-dim);
 }
 .status-badge {
   font-size: .7rem; font-weight: 600; text-transform: uppercase;
@@ -769,6 +797,18 @@ body.modal-open { overflow: hidden; }
   .modal-actions { flex-direction: column; }
   .modal-actions .btn-ghost,
   .modal-actions .btn-primary { width: 100%; }
+
+  /* Collapsible filter panel on mobile */
+  .filter-toggle-bar { display: flex; }
+  .filter-panel {
+    display: none; flex-direction: column;
+    border-bottom: 1px solid var(--border);
+  }
+  .filter-panel.open { display: flex; }
+
+  /* Remove double border when panel is open */
+  .filter-panel.open .stats-bar { border-bottom: 1px solid var(--border); }
+  .filter-panel.open .filter-bar { border-bottom: none; }
 }
 
 @media (max-width: 400px) {
