@@ -438,16 +438,18 @@ function renderGrid() {
         <span class="status-badge badge-${f.status}">${esc(f.status)}</span>
       </div>
       <div class="line-name">${esc(f.line)}</div>
-      ${f.tankId ? `<div class="tank-id">${esc(f.tankId)}</div>` : ''}
       ${f.genotype ? `<div class="genotype">${esc(f.genotype)}</div>` : ''}
       <div class="card-meta">
         ${f.count    ? `<span class="meta-item"><span class="meta-icon">🐟</span>${f.count}</span>` : ''}
         ${f.location ? `<span class="meta-item"><span class="meta-icon">📍</span>${esc(f.location)}</span>` : ''}
       </div>
       ${(posHtml || negHtml) ? `<div class="card-markers">${posHtml}${negHtml}</div>` : ''}
-      <div class="card-actions">
-        <button class="card-btn" onclick="event.stopPropagation();openEditModal('${esc(f.id)}')">Edit</button>
-        <button class="card-btn danger" onclick="event.stopPropagation();deleteFish('${esc(f.id)}')">Delete</button>
+      <div class="card-footer">
+        <span class="tank-id">${esc(f.tankId || '')}</span>
+        <div class="card-actions">
+          <button class="card-btn" onclick="event.stopPropagation();openEditModal('${esc(f.id)}')">Edit</button>
+          <button class="card-btn danger" onclick="event.stopPropagation();deleteFish('${esc(f.id)}')">Delete</button>
+        </div>
       </div>
     `;
     card.addEventListener('click', () => openDrawer(f.id));
