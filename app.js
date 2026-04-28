@@ -1562,6 +1562,16 @@ window.closeLightbox = function() {
   checkScrollLock();
 };
 
+// ── Quick Start Guide ─────────────────────────────────────────────────────────
+window.openGuide = function() {
+  document.getElementById('guide-overlay').classList.add('active');
+  document.body.classList.add('modal-open');
+};
+window.closeGuide = function() {
+  document.getElementById('guide-overlay').classList.remove('active');
+  checkScrollLock();
+};
+
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
 window.openScanner = function() {
   scanForForm = false;
@@ -1642,6 +1652,6 @@ function showToast(msg) {
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); }
-  if (e.key==='Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); }
+  if (e.key==='Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); }
   if ((e.metaKey||e.ctrlKey) && e.key==='n') { e.preventDefault(); openAddModal(); }
 });
