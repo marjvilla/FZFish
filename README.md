@@ -2,7 +2,7 @@
 
 A web-based zebrafish colony manager for Feng Lab, built on Google Sheets and Google Drive. Track tanks, filter by markers and status, scan barcodes, attach photos, and organize tanks into named experiments — all synced to a shared Google Sheet in real time.
 
-**Live app:** [marcibo.github.io/fengLabZfishInventory](https://marcibo.github.io/fengLabZfishInventory/)
+**Live app:** [marcibo.github.io/fengLabZfishInventory](https://marjvilla.github.io/FZFish/)
 
 > ⚠️ **Please do not edit the Google Sheet directly.** All changes should be made through the app — editing the sheet manually can break the inventory for everyone.
 
@@ -12,7 +12,7 @@ A web-based zebrafish colony manager for Feng Lab, built on Google Sheets and Go
 
 ### 🔐 Signing In
 
-Click **Sign in with Google** using your lab Google account that has access to the shared inventory sheet. Your session stays active until you sign out. Use **Test Mode** to explore without saving anything.
+Click **Sign in with Google** using your **@bu.edu** Google account that has access to the shared inventory drive. Your session stays active until you sign out. Use **Test Mode** to explore without saving anything.
 
 Need access? [Request it here](https://docs.google.com/forms/d/e/1FAIpQLSeIfXMJv0xoscLQZt9HayQppR0_R46Szo6mrpLPrAVnqHwtZQ/viewform?usp=publish-editor) or email [marvilla@bu.edu](mailto:marvilla@bu.edu).
 

@@ -1,7 +1,7 @@
 /* ── FZFish app.js ── */
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const CLIENT_ID     = '100004327605-af8aqv1jshg1u1bhiude24po7oc4mdf4.apps.googleusercontent.com';
+const CLIENT_ID     = '239772949162-ctqj91o3e56lep520shlo1trhq0rv42r.apps.googleusercontent.com';
 const SHEET_ID      = '1AviXu1_KPFRx158Af05qBmA-LCw2GhxJxvfZEFUCuqY';
 const TAB_NAME      = 'Fish';
 const DRIVE_FOLDER  = '1VTpNTlB-JMLPZNKzgm0IIXCRkk9Agzf7';
