@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <title>ZebraBase — Fish Inventory</title>
+  <title>FZFish — Fish Inventory</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
@@ -176,10 +176,37 @@
     <div class="header-right">
       <button class="icon-btn" onclick="openScanner()" title="Scan barcode">📷</button>
       <button class="icon-btn" onclick="syncSheets()" title="Sync" id="sync-btn">⟳</button>
+      <!-- Experiments -->
+      <div class="exp-btn-wrap">
+        <button class="btn-exp" id="experiments-btn" onclick="toggleExperimentsDropdown()">🧪 ▾</button>
+        <div id="experiments-dropdown" class="exp-dropdown hidden">
+          <div class="exp-dd-header">
+            <span class="exp-dd-title">Experiments</span>
+            <button class="exp-dd-new" onclick="createExperiment()">+ New</button>
+          </div>
+          <div id="experiments-list"></div>
+        </div>
+      </div>
       <button class="btn-primary add-btn" onclick="openAddModal()">+ Add Tank</button>
       <button class="btn-signout" id="signout-btn" onclick="signOut()">Sign Out</button>
     </div>
   </header>
+
+  <!-- Experiment context bar -->
+  <div id="experiment-bar" class="experiment-bar hidden">
+    <div class="exp-bar-left">
+      <span class="exp-bar-label">🧪</span>
+      <span id="exp-name-display" class="exp-bar-name"></span>
+      <input id="exp-name-input" class="exp-bar-input hidden" type="text"
+        onblur="saveRenameExp()" onkeydown="if(event.key==='Enter')saveRenameExp()" />
+      <button class="exp-bar-rename-btn" onclick="startRenameExp()" title="Rename">✏️</button>
+    </div>
+    <div class="exp-bar-right">
+      <button class="btn-exp-action" onclick="openTankPicker()">+ Add Tanks</button>
+      <button class="btn-exp-action danger" onclick="deleteExperiment()">Delete</button>
+      <button class="btn-exp-close" onclick="exitExperiment()">✕ Exit</button>
+    </div>
+  </div>
 
   <!-- Mobile: mini stat counts + filter button (hidden on desktop) -->
   <div class="filter-toggle-bar" id="filter-toggle-bar">
@@ -284,6 +311,24 @@
   <!-- FAB for mobile -->
   <button class="fab" onclick="openAddModal()">+</button>
 
+</div>
+
+<!-- Tank Picker Overlay -->
+<div id="tank-picker-overlay" class="overlay hidden">
+  <div class="picker-card-wrap">
+    <div class="picker-header">
+      <h2>Add Tanks to Experiment</h2>
+      <button class="close-btn" onclick="closeTankPicker()">✕</button>
+    </div>
+    <div class="picker-search-wrap">
+      <input id="picker-search" type="search" placeholder="Search tanks…" oninput="filterPicker()" />
+    </div>
+    <div id="picker-grid" class="picker-grid"></div>
+    <div class="picker-footer">
+      <button class="btn-ghost" onclick="closeTankPicker()">Cancel</button>
+      <button class="btn-primary" id="picker-confirm-btn" onclick="confirmTankPicker()">Done</button>
+    </div>
+  </div>
 </div>
 
 <!-- Toast -->

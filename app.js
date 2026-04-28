@@ -1,4 +1,4 @@
-/* ── ZebraBase app.js ── */
+/* ── FZFish app.js ── */
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const CLIENT_ID     = '100004327605-af8aqv1jshg1u1bhiude24po7oc4mdf4.apps.googleusercontent.com';
@@ -29,6 +29,9 @@ let editingId         = null;
 let demoMode          = false;
 let scannerRunning    = false;
 let scanForForm       = false;
+let experiments       = [];
+let currentExperiment = null;
+let pickerSelected    = new Set();
 let sortDir           = -1;  // -1 = desc (newest first), 1 = asc
 
 // A  B     C         D    E      F         G            H       I      J        K      L
@@ -52,7 +55,7 @@ const DEMO = [
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  if (localStorage.getItem('zebrabase-demo') === 'true') { useDemoMode(); return; }
+  if (localStorage.getItem('fzfish-demo') === 'true') { useDemoMode(); return; }
 
   // Restore session from sessionStorage if token still valid
   const storedToken  = sessionStorage.getItem('zb-token');
@@ -133,7 +136,7 @@ window.signIn = async function() {
       tokenResolvers.push({ resolve, reject });
       tokenClient.requestAccessToken({ prompt: 'select_account' });
     });
-    await Promise.all([fetchSheetGid(), fetchFromSheets(), fetchUserInfo()]);
+    await Promise.all([fetchSheetGid(), fetchFromSheets(), fetchUserInfo(), fetchExperiments()]);
     showApp();
   } catch(e) {
     btn.disabled = false; btn.innerHTML = googleBtnHTML();
@@ -144,7 +147,7 @@ window.signOut = function() {
   if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
   accessToken = null; tokenExpiry = 0; fishData = []; demoMode = false; currentUser = '';
   sessionStorage.clear();
-  localStorage.removeItem('zebrabase-demo');
+  localStorage.removeItem('fzfish-demo');
   document.getElementById('app').classList.add('hidden');
   document.getElementById('setup-overlay').classList.add('active');
   const btn = document.getElementById('signin-btn');
@@ -153,7 +156,7 @@ window.signOut = function() {
 
 window.useDemoMode = function() {
   demoMode = true;
-  localStorage.setItem('zebrabase-demo', 'true');
+  localStorage.setItem('fzfish-demo', 'true');
   fishData = DEMO.map((d, i) => ({ ...d, id: d.tankId, _rowIndex: i + 2 }));
   showApp();
   showToast('🐠 Demo mode active — data not saved');
@@ -265,7 +268,261 @@ window.syncSheets = async function() {
   const btn = document.getElementById('sync-btn');
   btn.classList.add('spinning');
   if (demoMode) { await new Promise(r => setTimeout(r, 600)); btn.classList.remove('spinning'); showToast('🐠 Demo mode — nothing to sync'); return; }
-  await fetchFromSheets(); renderAll(); btn.classList.remove('spinning');
+  await fetchFromSheets(); await fetchExperiments(); renderAll(); btn.classList.remove('spinning');
+};
+
+// ── Experiments ──────────────────────────────────────────────────────────────
+async function fetchExperiments() {
+  if (demoMode) return;
+  try {
+    const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties`);
+    const json = await res.json();
+    const reserved = new Set([TAB_NAME.toLowerCase(), 'changelog']);
+    const expSheets = (json.sheets || []).map(s => s.properties).filter(p => !reserved.has(p.title.toLowerCase()));
+    experiments = await Promise.all(expSheets.map(async p => ({
+      name: p.title, gid: p.sheetId, tankIds: await loadExpTankIds(p.title),
+    })));
+    renderExperimentsDropdown();
+  } catch(e) { console.warn('fetchExperiments:', e.message); }
+}
+
+async function loadExpTankIds(tabName) {
+  try {
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A2:A`);
+    const d = await r.json();
+    return (d.values || []).flat().filter(Boolean);
+  } catch(e) { return []; }
+}
+
+async function saveExpTankIds(tabName, tankIds) {
+  const range = `${encodeURIComponent(tabName)}!A2:A`;
+  await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}:clear`,
+    { method: 'POST', headers: {'Content-Type':'application/json'} });
+  if (tankIds.length) {
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}?valueInputOption=RAW`,
+      { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: tankIds.map(id => [id]) }) });
+  }
+}
+
+function renderExperimentsDropdown() {
+  const list = document.getElementById('experiments-list');
+  if (!list) return;
+  list.innerHTML = experiments.length
+    ? experiments.map((exp, i) => `
+        <button class="exp-dd-row${currentExperiment?.gid === exp.gid ? ' exp-dd-active' : ''}"
+            onclick="enterExperiment(${i});closeExperimentsDropdown()">
+          <span class="exp-dd-name">${esc(exp.name)}</span>
+          <span class="exp-dd-count">${exp.tankIds.length} tanks</span>
+        </button>`).join('')
+    : '<p class="exp-dd-empty">No experiments yet.</p>';
+}
+
+window.toggleExperimentsDropdown = function() {
+  const dd = document.getElementById('experiments-dropdown');
+  if (dd.classList.contains('hidden')) {
+    renderExperimentsDropdown();
+    const rect = document.getElementById('experiments-btn').getBoundingClientRect();
+    dd.style.top   = (rect.bottom + 4) + 'px';
+    dd.style.right = (window.innerWidth - rect.right) + 'px';
+    dd.classList.remove('hidden');
+  } else {
+    dd.classList.add('hidden');
+  }
+};
+window.closeExperimentsDropdown = function() {
+  document.getElementById('experiments-dropdown')?.classList.add('hidden');
+};
+
+window.enterExperiment = function(idx) {
+  const exp = experiments[idx];
+  if (!exp) return;
+  const validIds = new Set(fishData.map(f => f.tankId));
+  const cleaned  = exp.tankIds.filter(id => validIds.has(id));
+  if (cleaned.length !== exp.tankIds.length) {
+    exp.tankIds = cleaned;
+    if (!demoMode) saveExpTankIds(exp.name, cleaned);
+  }
+  currentExperiment = exp;
+  document.getElementById('experiment-bar').classList.remove('hidden');
+  document.getElementById('exp-name-display').textContent = exp.name;
+  document.getElementById('exp-name-input').classList.add('hidden');
+  document.getElementById('exp-name-display').classList.remove('hidden');
+  renderAll();
+};
+
+window.exitExperiment = function() {
+  currentExperiment = null;
+  document.getElementById('experiment-bar').classList.add('hidden');
+  renderAll();
+};
+
+window.startRenameExp = function() {
+  const input = document.getElementById('exp-name-input');
+  input.value = currentExperiment.name;
+  document.getElementById('exp-name-display').classList.add('hidden');
+  input.classList.remove('hidden');
+  input.focus(); input.select();
+};
+
+window.saveRenameExp = async function() {
+  const input   = document.getElementById('exp-name-input');
+  const display = document.getElementById('exp-name-display');
+  const newName = input.value.trim();
+  input.classList.add('hidden');
+  display.classList.remove('hidden');
+  if (!newName || newName === currentExperiment.name) { display.textContent = currentExperiment.name; return; }
+  const oldName = currentExperiment.name;
+  const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
+  display.textContent = newName;
+  currentExperiment.name = newName;
+  if (idx !== -1) experiments[idx].name = newName;
+  renderExperimentsDropdown();
+  if (demoMode) return;
+  try {
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: currentExperiment.gid, title: newName }, fields: 'title' } }] }),
+    });
+  } catch(e) {
+    showToast('❌ Rename failed');
+    currentExperiment.name = oldName;
+    if (idx !== -1) experiments[idx].name = oldName;
+    display.textContent = oldName;
+  }
+};
+
+window.createExperiment = async function() {
+  closeExperimentsDropdown();
+  const name = prompt('Experiment name:');
+  if (!name?.trim()) return;
+  const trimmed = name.trim();
+  if (demoMode) {
+    const exp = { name: trimmed, gid: Date.now(), tankIds: [] };
+    experiments.push(exp);
+    enterExperiment(experiments.length - 1);
+    return;
+  }
+  try {
+    showToast('Creating…');
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: trimmed } } }] }),
+    });
+    const d     = await r.json();
+    const props = d.replies[0].addSheet.properties;
+    await authFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(trimmed)}!A1?valueInputOption=RAW`,
+      { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: [['Tank ID']] }) }
+    );
+    const exp = { name: props.title, gid: props.sheetId, tankIds: [] };
+    experiments.push(exp);
+    enterExperiment(experiments.length - 1);
+  } catch(e) { showToast('❌ ' + e.message); }
+};
+
+window.deleteExperiment = async function() {
+  if (!currentExperiment) return;
+  if (!confirm(`Delete "${currentExperiment.name}"? This cannot be undone.`)) return;
+  const exp = currentExperiment;
+  exitExperiment();
+  experiments = experiments.filter(e => e.gid !== exp.gid);
+  renderExperimentsDropdown();
+  if (demoMode) return;
+  try {
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ requests: [{ deleteSheet: { sheetId: exp.gid } }] }),
+    });
+  } catch(e) { showToast('❌ Delete failed: ' + e.message); }
+};
+
+window.removeFromExperiment = function(tankId, event) {
+  event.stopPropagation();
+  if (!currentExperiment) return;
+  currentExperiment.tankIds = currentExperiment.tankIds.filter(id => id !== tankId);
+  const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
+  if (idx !== -1) experiments[idx].tankIds = currentExperiment.tankIds;
+  if (!demoMode) saveExpTankIds(currentExperiment.name, currentExperiment.tankIds);
+  renderAll();
+};
+
+// ── Tank picker ───────────────────────────────────────────────────────────────
+window.openTankPicker = function() {
+  if (!currentExperiment) return;
+  pickerSelected = new Set(currentExperiment.tankIds);
+  document.getElementById('picker-search').value = '';
+  renderPickerGrid('');
+  document.getElementById('tank-picker-overlay').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+};
+
+window.closeTankPicker = function() {
+  document.getElementById('tank-picker-overlay').classList.add('hidden');
+  checkScrollLock();
+};
+
+window.filterPicker = function() {
+  renderPickerGrid(document.getElementById('picker-search').value);
+};
+
+function renderPickerGrid(query) {
+  const q    = (query || '').toLowerCase();
+  const grid = document.getElementById('picker-grid');
+  const list = q ? fishData.filter(f =>
+    f.line.toLowerCase().includes(q) ||
+    (f.genotype || '').toLowerCase().includes(q) ||
+    (f.location || '').toLowerCase().includes(q) ||
+    (f.tankId   || '').toLowerCase().includes(q) ||
+    (f.markers  || []).some(m => m.toLowerCase().includes(q))
+  ) : fishData;
+  if (!list.length) { grid.innerHTML = '<p class="picker-empty">No tanks found.</p>'; return; }
+  grid.innerHTML = list.map(f => {
+    const checked = pickerSelected.has(f.tankId);
+    const posHtml = (f.markers || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
+    return `<label class="picker-card${checked ? ' picker-card-checked' : ''}">
+      <input type="checkbox" class="picker-cb" value="${esc(f.tankId)}"
+        ${checked ? 'checked' : ''} onchange="togglePickerTank('${esc(f.tankId)}', this.checked)" />
+      <div class="picker-card-body">
+        <div class="picker-card-line">${esc(f.line)}</div>
+        <div class="picker-card-meta">
+          <span class="status-badge badge-${f.status}">${esc(f.status)}</span>
+          ${f.tankId   ? `<span class="picker-card-id">${esc(f.tankId)}</span>` : ''}
+          ${f.location ? `<span class="picker-card-loc">📍 ${esc(f.location)}</span>` : ''}
+          ${posHtml}
+        </div>
+      </div>
+    </label>`;
+  }).join('');
+  updatePickerBtn();
+}
+
+window.togglePickerTank = function(tankId, checked) {
+  if (checked) pickerSelected.add(tankId);
+  else pickerSelected.delete(tankId);
+  document.querySelector(`.picker-cb[value="${tankId}"]`)?.closest('.picker-card')?.classList.toggle('picker-card-checked', checked);
+  updatePickerBtn();
+};
+
+function updatePickerBtn() {
+  const btn = document.getElementById('picker-confirm-btn');
+  if (btn) btn.textContent = `Done (${pickerSelected.size} selected)`;
+}
+
+window.confirmTankPicker = async function() {
+  if (!currentExperiment) return;
+  const btn = document.getElementById('picker-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  currentExperiment.tankIds = [...pickerSelected];
+  const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
+  if (idx !== -1) experiments[idx].tankIds = currentExperiment.tankIds;
+  if (!demoMode) {
+    try { await saveExpTankIds(currentExperiment.name, currentExperiment.tankIds); }
+    catch(e) { showToast('❌ ' + e.message); if (btn) { btn.disabled = false; updatePickerBtn(); } return; }
+  }
+  closeTankPicker();
+  renderAll();
+  renderExperimentsDropdown();
+  showToast(`✅ ${currentExperiment.tankIds.length} tanks saved`);
 };
 
 // ── Changelog ────────────────────────────────────────────────────────────────
@@ -312,7 +569,7 @@ function logChange(action, record, details = '') {
 
 // ── Google Drive ──────────────────────────────────────────────────────────────
 async function uploadPhoto(file) {
-  const metadata = { name: `zebrabase_${Date.now()}_${file.name}`, mimeType: file.type, parents: [DRIVE_FOLDER] };
+  const metadata = { name: `fzfish_${Date.now()}_${file.name}`, mimeType: file.type, parents: [DRIVE_FOLDER] };
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
@@ -372,7 +629,10 @@ function updateStats() {
 
 window.filterFish = function() {
   const q = (document.getElementById('search-input').value || '').toLowerCase();
-  filtered = fishData.filter(f => {
+  const base = currentExperiment
+    ? fishData.filter(f => currentExperiment.tankIds.includes(f.tankId))
+    : fishData;
+  filtered = base.filter(f => {
     if (activeStatuses.size > 0 && !activeStatuses.has(f.status)) return false;
     if (activePosMarkers.size > 0) {
       const s = new Set(f.markers || []);
@@ -447,8 +707,11 @@ function renderGrid() {
       <div class="card-footer">
         <span class="tank-id">${esc(f.tankId || '')}</span>
         <div class="card-actions">
-          <button class="card-btn" onclick="event.stopPropagation();openEditModal('${esc(f.id)}')">Edit</button>
-          <button class="card-btn danger" onclick="event.stopPropagation();deleteFish('${esc(f.id)}')">Delete</button>
+          ${currentExperiment
+            ? `<button class="card-btn danger" onclick="removeFromExperiment('${esc(f.tankId)}', event)">✕ Remove</button>`
+            : `<button class="card-btn" onclick="event.stopPropagation();openEditModal('${esc(f.id)}')">Edit</button>
+          <button class="card-btn danger" onclick="event.stopPropagation();deleteFish('${esc(f.id)}')">Delete</button>`
+          }
         </div>
       </div>
     `;
@@ -524,6 +787,8 @@ document.addEventListener('click', e => {
     const ddId = id === 'pos-filter-wrap' ? 'pos-dropdown' : 'neg-dropdown';
     if (wrap && !wrap.contains(e.target)) document.getElementById(ddId)?.classList.add('hidden');
   });
+  const expWrap = document.getElementById('exp-btn-wrap') || document.querySelector('.exp-btn-wrap');
+  if (expWrap && !expWrap.contains(e.target)) closeExperimentsDropdown();
 });
 
 // ── Filter chips (multi-select status) ───────────────────────────────────────
@@ -932,6 +1197,13 @@ window.addNewMarker = function(inputId) {
   input.value = ''; input.focus();
 };
 
+// Escape key closes dropdowns and overlays
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  closeExperimentsDropdown();
+  if (!document.getElementById('tank-picker-overlay')?.classList.contains('hidden')) closeTankPicker();
+});
+
 // Close picker dropdowns on outside click
 document.addEventListener('click', e => {
   ['pos-picker-wrap', 'neg-picker-wrap'].forEach(id => {
@@ -965,6 +1237,12 @@ window.deleteFish = async function(id) {
     } catch(e) { showToast('❌ Delete failed: ' + e.message); return; }
   } else {
     fishData = fishData.filter(f => f.id !== id);
+  }
+  // Remove deleted tank from any experiments
+  const deletedId = fish.tankId;
+  if (deletedId) {
+    experiments.forEach(exp => { exp.tankIds = exp.tankIds.filter(id => id !== deletedId); });
+    if (currentExperiment) currentExperiment.tankIds = currentExperiment.tankIds.filter(id => id !== deletedId);
   }
   showToast('🗑 Tank deleted');
   closeDrawer(); renderAll();
