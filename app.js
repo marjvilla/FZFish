@@ -349,6 +349,7 @@ window.enterExperiment = function(idx) {
   document.getElementById('exp-name-display').classList.remove('hidden');
   document.getElementById('filter-panel')?.classList.add('exp-mode');
   document.getElementById('filter-toggle-bar')?.classList.add('exp-mode');
+  document.getElementById('app')?.classList.add('in-experiment');
   renderAll();
 };
 
@@ -357,6 +358,7 @@ window.exitExperiment = function() {
   document.getElementById('experiment-bar').classList.add('hidden');
   document.getElementById('filter-panel')?.classList.remove('exp-mode');
   document.getElementById('filter-toggle-bar')?.classList.remove('exp-mode');
+  document.getElementById('app')?.classList.remove('in-experiment');
   renderAll();
 };
 
@@ -451,15 +453,24 @@ window.removeFromExperiment = function(tankId, event) {
 };
 
 // ── Tank picker ───────────────────────────────────────────────────────────────
-let pickerActiveStatus = null;
+let pickerActiveStatus     = null;
+let pickerActivePosMarkers = new Set();
+let pickerActiveNegMarkers = new Set();
+let pickerSortDir          = 1;
 
 window.openTankPicker = function() {
   if (!currentExperiment) return;
-  pickerSelected   = new Set(currentExperiment.tankIds);
-  pickerActiveStatus = null;
+  pickerSelected         = new Set(currentExperiment.tankIds);
+  pickerActiveStatus     = null;
+  pickerActivePosMarkers = new Set();
+  pickerActiveNegMarkers = new Set();
+  pickerSortDir          = 1;
   document.getElementById('picker-search').value = '';
   document.getElementById('picker-sort').value   = 'line';
+  const dirBtn = document.getElementById('picker-sort-dir-btn');
+  if (dirBtn) dirBtn.textContent = '↑';
   buildPickerStatusChips();
+  buildPickerMarkerDropdowns();
   renderPickerGrid();
   document.getElementById('tank-picker-overlay').classList.add('active');
   document.body.classList.add('modal-open');
@@ -481,10 +492,170 @@ window.setPickerStatus = function(status) {
   renderPickerGrid();
 };
 
+window.togglePickerSortDir = function() {
+  pickerSortDir *= -1;
+  const btn = document.getElementById('picker-sort-dir-btn');
+  if (btn) btn.textContent = pickerSortDir === 1 ? '↑' : '↓';
+  renderPickerGrid();
+  buildPickerFilterSheet();
+};
+
+function buildPickerMarkerDropdowns() {
+  const posBtn = document.getElementById('picker-pos-btn');
+  const negBtn = document.getElementById('picker-neg-btn');
+  if (posBtn) posBtn.textContent = '+Markers' + (pickerActivePosMarkers.size ? ` (${pickerActivePosMarkers.size})` : '') + ' ▾';
+  if (negBtn) negBtn.textContent = '−Markers' + (pickerActiveNegMarkers.size ? ` (${pickerActiveNegMarkers.size})` : '') + ' ▾';
+}
+
+window.togglePickerPosDropdown = function() {
+  const dd = document.getElementById('picker-pos-dd');
+  if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
+  document.getElementById('picker-neg-dd').classList.add('hidden');
+  const rect = document.getElementById('picker-pos-btn').getBoundingClientRect();
+  dd.style.top  = (rect.bottom + 4) + 'px';
+  dd.style.left = rect.left + 'px';
+  dd.innerHTML  = buildPickerMarkerHtml(uniquePosMarkers(), pickerActivePosMarkers, 'togglePickerPosMarker');
+  dd.classList.remove('hidden');
+};
+
+window.togglePickerNegDropdown = function() {
+  const dd = document.getElementById('picker-neg-dd');
+  if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
+  document.getElementById('picker-pos-dd').classList.add('hidden');
+  const rect = document.getElementById('picker-neg-btn').getBoundingClientRect();
+  dd.style.top  = (rect.bottom + 4) + 'px';
+  dd.style.left = rect.left + 'px';
+  dd.innerHTML  = buildPickerMarkerHtml(uniqueNegMarkers(), pickerActiveNegMarkers, 'togglePickerNegMarker');
+  dd.classList.remove('hidden');
+};
+
+function buildPickerMarkerHtml(markers, activeSet, toggleFn) {
+  if (!markers.length) return '<p class="marker-dropdown-empty">No markers in inventory</p>';
+  return markers.map(m => `
+    <label class="marker-check">
+      <input type="checkbox" value="${esc(m)}" ${activeSet.has(m) ? 'checked' : ''}
+        onchange="${toggleFn}('${esc(m)}', this.checked)" />
+      ${esc(m)}
+    </label>`).join('');
+}
+
+window.togglePickerPosMarker = function(m, checked) {
+  if (checked) pickerActivePosMarkers.add(m); else pickerActivePosMarkers.delete(m);
+  buildPickerMarkerDropdowns();
+  renderPickerGrid();
+};
+
+window.togglePickerNegMarker = function(m, checked) {
+  if (checked) pickerActiveNegMarkers.add(m); else pickerActiveNegMarkers.delete(m);
+  buildPickerMarkerDropdowns();
+  renderPickerGrid();
+};
+
 window.closeTankPicker = function() {
   document.getElementById('tank-picker-overlay').classList.remove('active');
+  document.getElementById('picker-filter-sheet').classList.remove('open');
   checkScrollLock();
 };
+
+window.openPickerFilters = function() {
+  buildPickerFilterSheet();
+  document.getElementById('picker-filter-sheet').classList.add('open');
+};
+
+window.closePickerFilters = function() {
+  document.getElementById('picker-filter-sheet').classList.remove('open');
+};
+
+window.clearAllPickerFilters = function() {
+  pickerActiveStatus     = null;
+  pickerActivePosMarkers = new Set();
+  pickerActiveNegMarkers = new Set();
+  document.getElementById('picker-sort').value = 'line';
+  buildPickerStatusChips();
+  buildPickerMarkerDropdowns();
+  updatePickerFilterCount();
+  renderPickerGrid();
+  buildPickerFilterSheet();
+};
+
+function updatePickerFilterCount() {
+  const count = (pickerActiveStatus ? 1 : 0) + pickerActivePosMarkers.size + pickerActiveNegMarkers.size;
+  const el = document.getElementById('picker-filter-active-count');
+  if (el) el.textContent = count ? ` (${count})` : '';
+}
+
+function buildPickerFilterSheet() {
+  const body = document.getElementById('picker-filter-body');
+  if (!body) return;
+  const statuses = ['Active','Nursery','Incubator','Low Stock','Breeding','Archived'];
+  let html = '';
+
+  // Status
+  html += '<div class="mf-section"><div class="mf-section-title">Status</div>';
+  html += `<button class="mf-row${!pickerActiveStatus ? ' mf-row-active' : ''}"
+      onclick="pickerActiveStatus=null;buildPickerStatusChips();updatePickerFilterCount();renderPickerGrid();buildPickerFilterSheet()">
+    <span class="mf-check">${!pickerActiveStatus ? '✓' : ''}</span>
+    <span class="mf-row-label">All</span>
+  </button>`;
+  statuses.forEach(s => {
+    const on = pickerActiveStatus === s;
+    html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+        onclick="setPickerStatus('${s}');updatePickerFilterCount();buildPickerFilterSheet()">
+      <span class="mf-check">${on ? '✓' : ''}</span>
+      <span class="mf-row-label">${s}</span>
+    </button>`;
+  });
+  html += '</div>';
+
+  // Sort
+  const sv  = document.getElementById('picker-sort')?.value || 'line';
+  const dir = pickerSortDir === 1 ? '↑' : '↓';
+  html += `<div class="mf-section"><div class="mf-section-title">Sort</div>
+    <div class="mf-sort-row">
+      <select class="mf-sort-select"
+          onchange="document.getElementById('picker-sort').value=this.value;filterPicker()">
+        <option value="line"    ${sv==='line'    ?'selected':''}>Line</option>
+        <option value="age"     ${sv==='age'     ?'selected':''}>Fert. Date</option>
+        <option value="count"   ${sv==='count'   ?'selected':''}>Count</option>
+        <option value="updated" ${sv==='updated' ?'selected':''}>Last Updated</option>
+      </select>
+      <button class="mf-dir-btn" onclick="togglePickerSortDir()">${dir}</button>
+    </div>
+  </div>`;
+
+  // + Markers
+  const pm = uniquePosMarkers();
+  if (pm.length) {
+    html += '<div class="mf-section"><div class="mf-section-title">+ Markers (present)</div>';
+    pm.forEach(m => {
+      const on = pickerActivePosMarkers.has(m);
+      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+          onclick="togglePickerPosMarker('${esc(m)}',${!on});updatePickerFilterCount();buildPickerFilterSheet()">
+        <span class="mf-check">${on ? '✓' : ''}</span>
+        <span class="mf-row-label mf-marker-pos">${esc(m)}</span>
+      </button>`;
+    });
+    html += '</div>';
+  }
+
+  // − Markers
+  const nm = uniqueNegMarkers();
+  if (nm.length) {
+    html += '<div class="mf-section"><div class="mf-section-title">− Markers (absent)</div>';
+    nm.forEach(m => {
+      const on = pickerActiveNegMarkers.has(m);
+      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+          onclick="togglePickerNegMarker('${esc(m)}',${!on});updatePickerFilterCount();buildPickerFilterSheet()">
+        <span class="mf-check">${on ? '✓' : ''}</span>
+        <span class="mf-row-label mf-marker-neg">${esc(m)}</span>
+      </button>`;
+    });
+    html += '</div>';
+  }
+
+  body.innerHTML = html;
+  updatePickerFilterCount();
+}
 
 window.filterPicker = function() {
   renderPickerGrid();
@@ -497,6 +668,14 @@ function renderPickerGrid() {
 
   let list = fishData.filter(f => {
     if (pickerActiveStatus && f.status !== pickerActiveStatus) return false;
+    if (pickerActivePosMarkers.size > 0) {
+      const s = new Set(f.markers || []);
+      for (const m of pickerActivePosMarkers) { if (!s.has(m)) return false; }
+    }
+    if (pickerActiveNegMarkers.size > 0) {
+      const s = new Set(f.negMarkers || []);
+      for (const m of pickerActiveNegMarkers) { if (!s.has(m)) return false; }
+    }
     if (!q) return true;
     return (
       f.line.toLowerCase().includes(q) ||
@@ -508,10 +687,12 @@ function renderPickerGrid() {
   });
 
   list = [...list].sort((a, b) => {
-    if (sort === 'age')     return (a.age     || '').localeCompare(b.age     || '');
-    if (sort === 'count')   return (a.count   || 0) - (b.count   || 0);
-    if (sort === 'updated') return (b.updated || '').localeCompare(a.updated || '');
-    return a.line.localeCompare(b.line);
+    let cmp = 0;
+    if (sort === 'age')     cmp = (a.age     || '').localeCompare(b.age     || '');
+    else if (sort === 'count')   cmp = (a.count   || 0) - (b.count   || 0);
+    else if (sort === 'updated') cmp = (a.updated || '').localeCompare(b.updated || '');
+    else                         cmp = a.line.localeCompare(b.line);
+    return pickerSortDir * cmp;
   });
   if (!list.length) { grid.innerHTML = '<p class="picker-empty">No tanks found.</p>'; return; }
   grid.innerHTML = list.map(f => {
@@ -827,6 +1008,8 @@ document.addEventListener('click', e => {
   });
   const expWrap = document.getElementById('exp-btn-wrap') || document.querySelector('.exp-btn-wrap');
   if (expWrap && !expWrap.contains(e.target)) closeExperimentsDropdown();
+  if (!e.target.closest('#picker-pos-btn')) document.getElementById('picker-pos-dd')?.classList.add('hidden');
+  if (!e.target.closest('#picker-neg-btn')) document.getElementById('picker-neg-dd')?.classList.add('hidden');
 });
 
 // ── Filter chips (multi-select status) ───────────────────────────────────────
@@ -896,7 +1079,10 @@ window.buildMobileFilterSheet = function() {
     { key: 'Low Stock', cls: 'sc-low-stock' },
     { key: 'Archived',  cls: 'sc-archived'  },
   ];
-  const cnt = s => fishData.filter(f => f.status === s).length;
+  const baseData = currentExperiment
+    ? fishData.filter(f => currentExperiment.tankIds.includes(f.tankId))
+    : fishData;
+  const cnt = s => baseData.filter(f => f.status === s).length;
   let html = '';
 
   // ── Status ──
@@ -906,7 +1092,7 @@ window.buildMobileFilterSheet = function() {
       onclick="clearFilters();buildMobileFilterSheet()">
     <span class="mf-check">${allActive ? '✓' : ''}</span>
     <span class="mf-row-label">All tanks</span>
-    <span class="mf-row-count">${fishData.length}</span>
+    <span class="mf-row-count">${baseData.length}</span>
   </button>`;
   statusList.forEach(({ key, cls }) => {
     const on = activeStatuses.has(key);
@@ -937,7 +1123,7 @@ window.buildMobileFilterSheet = function() {
   </div>`;
 
   // ── + Markers ──
-  const pm = uniquePosMarkers();
+  const pm = [...new Set(baseData.flatMap(f => f.markers || []))].sort();
   if (pm.length) {
     html += '<div class="mf-section"><div class="mf-section-title">+ Markers (present)</div>';
     pm.forEach(m => {
@@ -952,7 +1138,7 @@ window.buildMobileFilterSheet = function() {
   }
 
   // ── − Markers ──
-  const nm = uniqueNegMarkers();
+  const nm = [...new Set(baseData.flatMap(f => f.negMarkers || []))].sort();
   if (nm.length) {
     html += '<div class="mf-section"><div class="mf-section-title">− Markers (absent)</div>';
     nm.forEach(m => {
@@ -1286,6 +1472,26 @@ window.deleteFish = async function(id) {
   closeDrawer(); renderAll();
 };
 
+// ── Experiment membership from drawer ────────────────────────────────────────
+window.toggleTankInExperiment = async function(tankId, expIdx) {
+  const exp = experiments[expIdx];
+  if (!exp) return;
+  const inExp = exp.tankIds.includes(tankId);
+  if (inExp) {
+    exp.tankIds = exp.tankIds.filter(id => id !== tankId);
+    if (currentExperiment?.gid === exp.gid) currentExperiment.tankIds = exp.tankIds;
+  } else {
+    exp.tankIds = [...exp.tankIds, tankId];
+    if (currentExperiment?.gid === exp.gid) currentExperiment.tankIds = exp.tankIds;
+  }
+  if (!demoMode) saveExpTankIds(exp.name, exp.tankIds);
+  // Re-render just the exp section inside the drawer
+  const el = document.getElementById(`exp-membership-${expIdx}`);
+  if (el) el.classList.toggle('exp-member-active', exp.tankIds.includes(tankId));
+  renderExperimentsDropdown();
+  if (currentExperiment) renderAll();
+};
+
 // ── Detail Drawer ─────────────────────────────────────────────────────────────
 window.openDrawer = function(id) {
   const f = fishData.find(x => x.id === id);
@@ -1315,6 +1521,20 @@ window.openDrawer = function(id) {
       <div style="display:flex;flex-wrap:wrap;gap:.35rem;padding:.5rem 0">${negHtml}</div>
     </div>
     ${f.notes ? `<div class="drawer-section"><h4>Notes</h4><p style="font-size:.88rem;color:var(--text-muted);line-height:1.5">${esc(f.notes)}</p></div>` : ''}
+    ${experiments.length ? `
+    <div class="drawer-section">
+      <h4>🧪 Experiments</h4>
+      <div class="drawer-exp-list">
+        ${experiments.map((exp, i) => {
+          const inExp = exp.tankIds.includes(f.tankId);
+          return `<button id="exp-membership-${i}"
+            class="drawer-exp-btn${inExp ? ' exp-member-active' : ''}"
+            onclick="toggleTankInExperiment('${esc(f.tankId)}', ${i})">
+            ${inExp ? '✓' : '+'} ${esc(exp.name)}
+          </button>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
     <div class="drawer-actions">
       <button class="btn-primary" onclick="closeDrawer();openEditModal('${esc(f.id)}')">Edit</button>
       <button class="btn-ghost"   onclick="closeDrawer();deleteFish('${esc(f.id)}')">Delete</button>

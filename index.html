@@ -313,6 +313,22 @@
 
 </div>
 
+<!-- Picker filter bottom sheet (mobile) -->
+<div id="picker-filter-sheet" class="mobile-filter-sheet">
+  <div class="mobile-filter-backdrop" onclick="closePickerFilters()"></div>
+  <div class="mobile-filter-inner">
+    <div class="mobile-filter-header">
+      <span class="mobile-filter-title">Filters &amp; Sort</span>
+      <button class="mf-close-btn" onclick="closePickerFilters()">✕</button>
+    </div>
+    <div class="mobile-filter-body" id="picker-filter-body"></div>
+    <div class="mobile-filter-footer">
+      <button class="btn-ghost mf-btn" onclick="clearAllPickerFilters()">Clear All</button>
+      <button class="btn-primary mf-btn" onclick="closePickerFilters()">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Tank Picker Overlay -->
 <div id="tank-picker-overlay" class="overlay">
   <div class="picker-card-wrap">
@@ -324,13 +340,20 @@
       <input id="picker-search" type="search" placeholder="Search tanks…" oninput="filterPicker()" />
       <div class="picker-filter-row">
         <div class="picker-status-chips" id="picker-status-chips"></div>
+      </div>
+      <div class="picker-filter-row picker-marker-row">
+        <button class="marker-filter-btn" id="picker-pos-btn" onclick="togglePickerPosDropdown()">+Markers ▾</button>
+        <button class="marker-filter-btn neg-filter-btn" id="picker-neg-btn" onclick="togglePickerNegDropdown()">−Markers ▾</button>
         <select id="picker-sort" class="sort-select" onchange="filterPicker()">
           <option value="line">Line</option>
           <option value="age">Fert. Date</option>
           <option value="count">Count</option>
           <option value="updated">Last Updated</option>
         </select>
+        <button class="sort-dir-btn" id="picker-sort-dir-btn" onclick="togglePickerSortDir()" title="Toggle sort direction">↑</button>
       </div>
+      <div id="picker-pos-dd" class="marker-dropdown hidden"></div>
+      <div id="picker-neg-dd" class="marker-dropdown hidden"></div>
     </div>
     <div id="picker-grid" class="picker-grid"></div>
     <div class="picker-footer">

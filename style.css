@@ -974,7 +974,13 @@ body.modal-open { overflow: hidden; }
   /* Show mini-stat toggle bar, hide full desktop filter panel */
   .filter-toggle-bar { display: flex; }
   .filter-panel { display: none; }
+
+  #picker-filter-sheet { z-index: 600; }
 }
+
+/* Hide Add Tank button and FAB in experiment mode */
+.app.in-experiment .add-btn,
+.app.in-experiment .fab { display: none !important; }
 
 /* Hide stats bar in experiment mode */
 .filter-panel.exp-mode .stats-bar,
@@ -1115,7 +1121,8 @@ body.modal-open { overflow: hidden; }
   flex-shrink: 0;
 }
 .picker-header h2 { margin: 0; font-size: 1.1rem; }
-.picker-search-wrap { padding: .75rem 1.25rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.picker-search-wrap { padding: .75rem 1.25rem; border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: hidden; }
+
 .picker-filter-row {
   display: flex;
   align-items: center;
@@ -1123,8 +1130,29 @@ body.modal-open { overflow: hidden; }
   margin-top: .5rem;
   flex-wrap: wrap;
 }
-.picker-status-chips { display: flex; flex-wrap: wrap; gap: .35rem; flex: 1; }
+.picker-status-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
 .picker-status-chip { font-size: .75rem; padding: .25rem .6rem; }
+.picker-marker-row { margin-top: .4rem; }
+
+/* Drawer experiment membership */
+.drawer-exp-list { display: flex; flex-wrap: wrap; gap: .45rem; padding: .4rem 0; }
+.drawer-exp-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: .3rem .7rem;
+  font-size: .82rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.drawer-exp-btn:hover { background: var(--surface3); }
+.exp-member-active {
+  background: rgba(88,166,255,.12);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
 
 .picker-search-wrap input {
   width: 100%;
