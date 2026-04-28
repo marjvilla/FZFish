@@ -452,12 +452,12 @@ window.openTankPicker = function() {
   pickerSelected = new Set(currentExperiment.tankIds);
   document.getElementById('picker-search').value = '';
   renderPickerGrid('');
-  document.getElementById('tank-picker-overlay').classList.remove('hidden');
+  document.getElementById('tank-picker-overlay').classList.add('active');
   document.body.classList.add('modal-open');
 };
 
 window.closeTankPicker = function() {
-  document.getElementById('tank-picker-overlay').classList.add('hidden');
+  document.getElementById('tank-picker-overlay').classList.remove('active');
   checkScrollLock();
 };
 
