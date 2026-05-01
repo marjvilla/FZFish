@@ -708,6 +708,7 @@ body.modal-open { overflow: hidden; }
   font-family: var(--font-mono);
   transition: background var(--transition);
 }
+.form-group .mpick-row { text-transform: none; letter-spacing: 0; }
 .mpick-row:hover    { background: var(--surface2); }
 .mpick-row.mpick-checked { background: rgba(63,185,80,.08); }
 .mpick-row input    { accent-color: var(--green); flex-shrink: 0; }
