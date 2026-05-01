@@ -1384,9 +1384,9 @@ function buildPickerHtml(allMarkers, currentList, toggleFn, newInputId) {
         ${esc(m)}
       </label>`;
     }).join('');
-    html += '<div class="mpick-divider">── or type new ──</div>';
   }
-  html += `<div class="mpick-new-row">
+  html += `<div class="mpick-add-trigger" id="${newInputId}-trigger" onclick="expandMarkerInput('${newInputId}')">＋ Add new marker</div>
+  <div class="mpick-new-row hidden" id="${newInputId}-row">
     <input type="text" id="${newInputId}" class="mpick-new-input" placeholder="New marker…"
       autocapitalize="none" autocorrect="off" spellcheck="false"
       onkeydown="if(event.key==='Enter'){event.preventDefault();addNewMarker('${newInputId}')}" />
@@ -1394,6 +1394,15 @@ function buildPickerHtml(allMarkers, currentList, toggleFn, newInputId) {
   </div>`;
   return html;
 }
+
+window.expandMarkerInput = function(inputId) {
+  document.getElementById(inputId + '-trigger')?.classList.add('hidden');
+  const row = document.getElementById(inputId + '-row');
+  if (row) {
+    row.classList.remove('hidden');
+    setTimeout(() => document.getElementById(inputId)?.focus(), 50);
+  }
+};
 
 function refreshPosPicker() {
   const dd = document.getElementById('pos-picker-dropdown');
@@ -1468,7 +1477,8 @@ window.addNewMarker = function(inputId) {
     }
     refreshNegPicker();
   }
-  input.value = ''; input.focus();
+  input.value = '';
+  input.blur();
 };
 
 // Escape key closes dropdowns and overlays

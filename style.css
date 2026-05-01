@@ -716,6 +716,12 @@ body.modal-open { overflow: hidden; }
   padding: .4rem .9rem .25rem;
   border-top: 1px solid var(--border); margin-top: .2rem;
 }
+.mpick-add-trigger {
+  padding: .45rem .9rem .5rem;
+  font-size: .82rem; color: var(--accent); cursor: pointer;
+  border-top: 1px solid var(--border); margin-top: .2rem;
+}
+.mpick-add-trigger:hover { opacity: .75; }
 .mpick-new-row {
   display: flex; gap: .4rem; padding: .4rem .9rem .5rem;
 }
