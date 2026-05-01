@@ -125,6 +125,14 @@
             <div id="photo-preview-wrap" class="photo-preview-wrap hidden">
               <img id="f-photo-preview" class="photo-preview" alt="Tank photo" />
               <button type="button" class="photo-remove-btn" onclick="removePhoto()">✕ Remove</button>
+              <div class="thumb-crop-wrap">
+                <div class="thumb-crop-label">Drag to set thumbnail focus</div>
+                <div class="thumb-crop-stage" id="thumb-crop-stage"
+                     onmousedown="startThumbDrag(event)" ontouchstart="startThumbDrag(event)">
+                  <img id="thumb-crop-img" class="thumb-crop-img" alt="" />
+                  <div class="thumb-crop-dot" id="thumb-crop-dot"></div>
+                </div>
+              </div>
             </div>
             <label for="f-photo" class="photo-upload-btn" id="photo-upload-label">
               📷 Add Photo

@@ -25,6 +25,7 @@ let currentNegMarkers = [];
 let currentPhotoUrl   = null;
 let originalPhotoUrl  = null;
 let pendingPhotoFile  = null;
+let currentThumbPos   = '50% 15%';
 let editingId         = null;
 let demoMode          = false;
 let scannerRunning    = false;
@@ -41,6 +42,7 @@ const COL = {
   age:        3, count:    4, location:   5,
   markers:    6, status:   7, notes:      8,
   updated:    9, photo:   10, negMarkers: 11,
+  thumbPos:  12,
 };
 
 // ── Demo data ────────────────────────────────────────────────────────────────
@@ -218,6 +220,7 @@ async function fetchFromSheets() {
       notes:       r[COL.notes]      || '',
       updated:     r[COL.updated]    || '',
       photoUrl:    r[COL.photo]      || '',
+      thumbPos:    r[COL.thumbPos]   || '',
       _rowIndex: i + 2,
     }));
     showToast('✅ Synced ' + fishData.length + ' tanks');
@@ -258,9 +261,10 @@ function recordToRow(r) {
     r.tankId, r.line, r.genotype, r.age, r.count, r.location,
     (r.markers    || []).join(', '),
     r.status, r.notes,
-    new Date().toISOString().slice(0, 10),
+    r.updated || new Date().toISOString().slice(0, 16).replace('T', ' '),
     r.photoUrl    || '',
     (r.negMarkers || []).join(', '),
+    r.thumbPos    || '',
   ];
 }
 
@@ -866,6 +870,15 @@ function formatDate(d) {
   return isNaN(dt) ? d : dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+function formatDateTime(d) {
+  if (!d) return '—';
+  const dt = new Date(d.includes('T') || d.includes(' ') ? d.replace(' ', 'T') : d + 'T00:00:00');
+  if (isNaN(dt)) return d;
+  const date = dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const time = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return d.length > 10 ? `${date} · ${time}` : date;
+}
+
 function calcDpf(d) {
   if (!d) return '?';
   const dt = new Date(d + 'T00:00:00');
@@ -949,7 +962,7 @@ function renderGrid() {
 
     const posHtml   = (f.markers    || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
     const negHtml   = (f.negMarkers || []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join('');
-    const thumbHtml = f.photoUrl ? `<img class="card-thumb" src="${esc(f.photoUrl)}" loading="lazy" />` : '';
+    const thumbHtml = f.photoUrl ? `<img class="card-thumb" src="${esc(f.photoUrl)}" loading="lazy" style="object-position:${esc(f.thumbPos || '50% 15%')}" />` : '';
 
     card.innerHTML = `
       ${thumbHtml}
@@ -1234,6 +1247,7 @@ function checkScrollLock() {
 window.openAddModal = function() {
   editingId = null; currentMarkers = []; currentNegMarkers = [];
   currentPhotoUrl = null; originalPhotoUrl = null; pendingPhotoFile = null;
+  currentThumbPos = '50% 15%';
   document.getElementById('modal-title').textContent = 'Add Tank';
   document.getElementById('fish-form').reset();
   document.getElementById('f-tank-id').value             = '';
@@ -1250,6 +1264,7 @@ window.openEditModal = function(id) {
   if (!f) return;
   editingId = id; currentMarkers = [...(f.markers || [])]; currentNegMarkers = [...(f.negMarkers || [])];
   currentPhotoUrl = f.photoUrl || null; originalPhotoUrl = f.photoUrl || null; pendingPhotoFile = null;
+  currentThumbPos = f.thumbPos || '50% 15%';
   document.getElementById('modal-title').textContent = 'Edit Tank';
   document.getElementById('f-tank-id').value  = f.tankId || f.id || '';
   document.getElementById('f-line').value     = f.line;
@@ -1286,7 +1301,51 @@ function showPhotoPreview(url) {
   img.onclick = () => openLightbox(url);
   document.getElementById('photo-preview-wrap').classList.remove('hidden');
   document.getElementById('photo-upload-label').classList.add('hidden');
+  const cropImg = document.getElementById('thumb-crop-img');
+  if (cropImg) { cropImg.src = url; }
+  applyThumbCropPos(currentThumbPos);
 }
+
+function applyThumbCropPos(pos) {
+  currentThumbPos = pos;
+  const parts = pos.split(' ');
+  const xPct = parseFloat(parts[0]) || 50;
+  const yPct = parseFloat(parts[1]) || 15;
+  const dot = document.getElementById('thumb-crop-dot');
+  const img = document.getElementById('thumb-crop-img');
+  if (dot) { dot.style.left = xPct + '%'; dot.style.top = yPct + '%'; }
+  if (img)  { img.style.objectPosition = pos; }
+}
+
+function getThumbCropPos(e, stage) {
+  const rect = stage.getBoundingClientRect();
+  const src  = e.touches ? e.touches[0] : e;
+  const x = Math.max(0, Math.min(100, Math.round(((src.clientX - rect.left) / rect.width)  * 100)));
+  const y = Math.max(0, Math.min(100, Math.round(((src.clientY - rect.top)  / rect.height) * 100)));
+  return { x, y };
+}
+
+window.startThumbDrag = function(e) {
+  e.preventDefault();
+  const stage = document.getElementById('thumb-crop-stage');
+  const { x, y } = getThumbCropPos(e, stage);
+  applyThumbCropPos(x + '% ' + y + '%');
+  const onMove = ev => {
+    ev.preventDefault();
+    const p = getThumbCropPos(ev, stage);
+    applyThumbCropPos(p.x + '% ' + p.y + '%');
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('mouseup',   onUp);
+    document.removeEventListener('touchend',  onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('mouseup',   onUp);
+  document.addEventListener('touchend',  onUp);
+};
 window.handlePhotoSelect = function(input) {
   const file = input.files[0];
   if (!file) return;
@@ -1317,7 +1376,8 @@ window.saveFish = async function(e) {
     negMarkers: [...currentNegMarkers],
     status:     document.querySelector('input[name="status"]:checked').value,
     notes:      document.getElementById('f-notes').value.trim(),
-    photoUrl, updated: new Date().toISOString().slice(0, 10),
+    photoUrl, thumbPos: currentThumbPos,
+    updated: new Date().toISOString().slice(0, 16).replace('T', ' '),
   };
   record.id = record.tankId;
 
@@ -1570,7 +1630,7 @@ window.openDrawer = function(id) {
       <div class="drawer-row"><span class="drawer-row-label">Fert. Date</span><span class="drawer-row-val">${formatDate(f.age)}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Count</span><span class="drawer-row-val">${f.count || '—'}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Location</span><span class="drawer-row-val">${esc(f.location || '—')}</span></div>
-      <div class="drawer-row"><span class="drawer-row-label">Last Updated</span><span class="drawer-row-val">${esc(f.updated || '—')}</span></div>
+      <div class="drawer-row"><span class="drawer-row-label">Last Updated</span><span class="drawer-row-val">${formatDateTime(f.updated)}</span></div>
     </div>
     <div class="drawer-section">
       <h4>Positive Markers</h4>

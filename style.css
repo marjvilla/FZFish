@@ -382,6 +382,29 @@ body {
 }
 .photo-remove-btn:hover { background: var(--red); }
 
+.thumb-crop-wrap { margin-top: .6rem; }
+.thumb-crop-label {
+  font-size: .72rem; color: var(--text-muted);
+  margin-bottom: .3rem;
+}
+.thumb-crop-stage {
+  position: relative; height: 110px; overflow: hidden;
+  border-radius: var(--radius-sm); cursor: crosshair;
+  border: 1.5px dashed var(--border); user-select: none;
+}
+.thumb-crop-img {
+  width: 100%; height: 100%; object-fit: cover;
+  display: block; pointer-events: none; user-select: none;
+}
+.thumb-crop-dot {
+  position: absolute; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 5px rgba(0,0,0,.6);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 /* Card photo thumbnail */
 .card-thumb {
   width: calc(100% + 2.2rem); margin: -1.1rem -1.1rem .85rem;
