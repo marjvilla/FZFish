@@ -297,6 +297,7 @@
           </button>
           <div id="neg-dropdown" class="marker-dropdown hidden"></div>
         </div>
+        <button id="reset-filters-btn" class="reset-filters-btn hidden" onclick="clearFilters()" title="Clear all filters">✕ Reset</button>
         <select id="sort-select" onchange="sortFish()" class="sort-select">
           <option value="line">Line</option>
           <option value="age">Fert. Date</option>
@@ -313,7 +314,7 @@
   <main class="fish-grid" id="fish-grid">
     <div class="empty-state" id="empty-state">
       <div class="empty-icon">🐠</div>
-      <p>No tanks found. Add one above!</p>
+      <p>No tanks found!</p>
     </div>
   </main>
 
@@ -354,10 +355,10 @@
         <button class="marker-filter-btn" id="picker-pos-btn" onclick="togglePickerPosDropdown()">+Markers ▾</button>
         <button class="marker-filter-btn neg-filter-btn" id="picker-neg-btn" onclick="togglePickerNegDropdown()">−Markers ▾</button>
         <select id="picker-sort" class="sort-select" onchange="filterPicker()">
-          <option value="line">Line</option>
           <option value="age">Fert. Date</option>
-          <option value="count">Count</option>
           <option value="updated">Last Updated</option>
+          <option value="line">Line</option>
+          <option value="count">Count</option>
         </select>
         <button class="sort-dir-btn" id="picker-sort-dir-btn" onclick="togglePickerSortDir()" title="Toggle sort direction">↑</button>
       </div>
@@ -428,7 +429,7 @@
 
       <div class="guide-section">
         <h3>🏞️ Pictures</h3>
-        <p>Please add photos to each tank at each stage — this <strong>includes embryo plates</strong> — to make inventory easier for anyone working on your project. Photos are automatically saved to the shared Google Drive folder if you ever need the original.</p>
+        <p>Please add photos to each tank at each stage — this <strong>includes embryo plates</strong> — to make inventory easier for anyone working on your project. Photos are automatically saved to the shared Google Drive folder if you ever need the original. Be sure to <strong>adjust the tape to be in frame</strong> using the dot under the uploaded photo</p>
       </div>
 
       <div class="guide-section">

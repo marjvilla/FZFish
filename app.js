@@ -811,7 +811,7 @@ function logChange(action, record, details = '') {
 function compressPhoto(file) {
   return new Promise((resolve) => {
     const MAX_PX = 1800;
-    const QUALITY = 0.88;
+    const QUALITY = 0.75;
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
@@ -905,6 +905,13 @@ window.filterFish = function() {
   const base = currentExperiment
     ? fishData.filter(f => currentExperiment.tankIds.includes(f.tankId))
     : fishData;
+
+  // Purge stale marker filters (marker deleted from all tanks)
+  const allPos = new Set(base.flatMap(f => f.markers    || []));
+  const allNeg = new Set(base.flatMap(f => f.negMarkers || []));
+  for (const m of [...activePosMarkers]) { if (!allPos.has(m)) activePosMarkers.delete(m); }
+  for (const m of [...activeNegMarkers]) { if (!allNeg.has(m)) activeNegMarkers.delete(m); }
+
   filtered = base.filter(f => {
     if (activeStatuses.size > 0 && !activeStatuses.has(f.status)) return false;
     if (activePosMarkers.size > 0) {
@@ -1077,6 +1084,12 @@ window.setFilter = function(status) {
 
 window.clearFilters = function() {
   activeStatuses.clear();
+  activePosMarkers.clear();
+  activeNegMarkers.clear();
+  document.getElementById('pos-filter-count').textContent = '';
+  document.getElementById('neg-filter-count').textContent = '';
+  document.getElementById('pos-filter-btn')?.classList.remove('active');
+  document.getElementById('neg-filter-btn')?.classList.remove('active');
   refreshChips();
   updateFilterSummary();
   filterFish();
@@ -1093,6 +1106,7 @@ function updateFilterSummary() {
   const total = activeStatuses.size + activePosMarkers.size + activeNegMarkers.size;
   const countEl = document.getElementById('filter-active-count');
   if (countEl) countEl.textContent = total > 0 ? ` (${total})` : '';
+  document.getElementById('reset-filters-btn')?.classList.toggle('hidden', total === 0);
   updateMiniStats();
 }
 

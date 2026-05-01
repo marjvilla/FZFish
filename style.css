@@ -786,6 +786,13 @@ body.modal-open { overflow: hidden; }
   transition: border-color var(--transition), color var(--transition);
 }
 .sort-dir-btn:hover { border-color: var(--accent); color: var(--accent); }
+.reset-filters-btn {
+  background: none; border: 1px solid var(--red);
+  color: var(--red); border-radius: var(--radius-sm);
+  padding: .2rem .6rem; font-size: .78rem; cursor: pointer; flex-shrink: 0;
+  transition: background var(--transition), color var(--transition);
+}
+.reset-filters-btn:hover { background: var(--red); color: #fff; }
 
 /* ── Fish Grid ── */
 .fish-grid {
