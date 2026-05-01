@@ -279,9 +279,8 @@ async function fetchExperiments() {
     const json = await res.json();
     const reserved = new Set([TAB_NAME.toLowerCase(), 'changelog']);
     const expSheets = (json.sheets || []).map(s => s.properties).filter(p => !reserved.has(p.title.toLowerCase()));
-    experiments = await Promise.all(expSheets.map(async p => ({
-      name: p.title, gid: p.sheetId, tankIds: await loadExpTankIds(p.title),
-    })));
+    // Only store names/gids — tank IDs are loaded lazily when an experiment is opened
+    experiments = expSheets.map(p => ({ name: p.title, gid: p.sheetId, tankIds: null }));
     renderExperimentsDropdown();
   } catch(e) { console.warn('fetchExperiments:', e.message); }
 }
@@ -312,7 +311,7 @@ function renderExperimentsDropdown() {
         <button class="exp-dd-row${currentExperiment?.gid === exp.gid ? ' exp-dd-active' : ''}"
             onclick="enterExperiment(${i});closeExperimentsDropdown()">
           <span class="exp-dd-name">${esc(exp.name)}</span>
-          <span class="exp-dd-count">${exp.tankIds.length} tanks</span>
+          <span class="exp-dd-count">${exp.tankIds === null ? '…' : exp.tankIds.length + ' tanks'}</span>
         </button>`).join('')
     : '<p class="exp-dd-empty">No experiments yet.</p>';
 }
@@ -333,9 +332,16 @@ window.closeExperimentsDropdown = function() {
   document.getElementById('experiments-dropdown')?.classList.add('hidden');
 };
 
-window.enterExperiment = function(idx) {
+window.enterExperiment = async function(idx) {
   const exp = experiments[idx];
   if (!exp) return;
+
+  // Lazy-load tank IDs the first time this experiment is opened
+  if (exp.tankIds === null) {
+    showToast('Loading experiment…');
+    exp.tankIds = demoMode ? [] : await loadExpTankIds(exp.name);
+  }
+
   const validIds = new Set(fishData.map(f => f.tankId));
   const cleaned  = exp.tankIds.filter(id => validIds.has(id));
   if (cleaned.length !== exp.tankIds.length) {
@@ -474,6 +480,17 @@ window.openTankPicker = function() {
   renderPickerGrid();
   document.getElementById('tank-picker-overlay').classList.add('active');
   document.body.classList.add('modal-open');
+
+  const grid = document.getElementById('picker-grid');
+  if (grid && !grid._scrollListenerAttached) {
+    grid._scrollListenerAttached = true;
+    const closePickerDds = () => {
+      document.getElementById('picker-pos-dd')?.classList.add('hidden');
+      document.getElementById('picker-neg-dd')?.classList.add('hidden');
+    };
+    grid.addEventListener('touchstart', closePickerDds, { passive: true });
+    grid.addEventListener('scroll',     closePickerDds, { passive: true });
+  }
 };
 
 function buildPickerStatusChips() {
@@ -787,11 +804,35 @@ function logChange(action, record, details = '') {
 }
 
 // ── Google Drive ──────────────────────────────────────────────────────────────
+function compressPhoto(file) {
+  return new Promise((resolve) => {
+    const MAX_PX = 1800;
+    const QUALITY = 0.88;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > MAX_PX || height > MAX_PX) {
+        if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX; }
+        else                 { width  = Math.round(width  * MAX_PX / height); height = MAX_PX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 async function uploadPhoto(file) {
-  const metadata = { name: `fzfish_${Date.now()}_${file.name}`, mimeType: file.type, parents: [DRIVE_FOLDER] };
+  const compressed = await compressPhoto(file);
+  const metadata = { name: `fzfish_${Date.now()}_${file.name.replace(/\.[^.]+$/, '.jpg')}`, mimeType: 'image/jpeg', parents: [DRIVE_FOLDER] };
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  form.append('file', file);
+  form.append('file', compressed);
   const { id: fileId } = await (await authFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form })).json();
   await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1336,7 +1377,7 @@ function buildPickerHtml(allMarkers, currentList, toggleFn, newInputId) {
   let html = '';
   if (allMarkers.length) {
     html += allMarkers.map(m => {
-      const on = currentList.includes(m);
+      const on = currentList.some(x => x.toLowerCase() === m.toLowerCase());
       return `<label class="mpick-row${on ? ' mpick-checked' : ''}">
         <input type="checkbox" ${on ? 'checked' : ''}
           onchange="${toggleFn}('${esc(m)}', this.checked)" />
@@ -1412,10 +1453,18 @@ window.addNewMarker = function(inputId) {
   const v = input.value.trim();
   if (!v) return;
   if (inputId === 'pos-new-input') {
-    if (!currentMarkers.includes(v)) { currentMarkers.push(v); renderMarkerTags(); }
+    const existing = uniquePosMarkers().find(m => m.toLowerCase() === v.toLowerCase());
+    const marker = existing || v;
+    if (!currentMarkers.find(m => m.toLowerCase() === v.toLowerCase())) {
+      currentMarkers.push(marker); renderMarkerTags();
+    }
     refreshPosPicker();
   } else {
-    if (!currentNegMarkers.includes(v)) { currentNegMarkers.push(v); renderNegMarkerTags(); }
+    const existing = uniqueNegMarkers().find(m => m.toLowerCase() === v.toLowerCase());
+    const marker = existing || v;
+    if (!currentNegMarkers.find(m => m.toLowerCase() === v.toLowerCase())) {
+      currentNegMarkers.push(marker); renderNegMarkerTags();
+    }
     refreshNegPicker();
   }
   input.value = ''; input.focus();

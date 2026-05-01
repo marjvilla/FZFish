@@ -384,7 +384,7 @@ body {
 /* Card photo thumbnail */
 .card-thumb {
   width: calc(100% + 2.2rem); margin: -1.1rem -1.1rem .85rem;
-  height: 110px; object-fit: cover;
+  height: 110px; object-fit: cover; object-position: center center;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   display: block;
 }
@@ -1175,6 +1175,8 @@ body.modal-open { overflow: hidden; }
 }
 .picker-grid {
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   flex: 1;
   padding: .75rem 1.25rem;
   display: grid;
