@@ -254,6 +254,7 @@ body {
   padding: 2rem 1.5rem 1.5rem;
   width: 100%; max-width: 600px;
   max-height: 90dvh; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   box-shadow: var(--shadow);
 }
 .modal-card h2 {
@@ -384,7 +385,7 @@ body {
 /* Card photo thumbnail */
 .card-thumb {
   width: calc(100% + 2.2rem); margin: -1.1rem -1.1rem .85rem;
-  height: 110px; object-fit: cover; object-position: center center;
+  height: 110px; object-fit: cover; object-position: center 15%;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   display: block;
 }
@@ -698,7 +699,7 @@ body.modal-open { overflow: hidden; }
   position: absolute; left: 0; right: 0; top: calc(100% + 4px);
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow);
-  max-height: 230px; overflow-y: auto; z-index: 250;
+  max-height: 230px; overflow-y: auto; -webkit-overflow-scrolling: touch; z-index: 250;
   padding: .3rem 0;
 }
 .mpick-row {

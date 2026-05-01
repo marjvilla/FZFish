@@ -838,7 +838,7 @@ async function uploadPhoto(file) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role: 'reader', type: 'anyone' }),
   });
-  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
+  return `https://lh3.googleusercontent.com/d/${fileId}=w800`;
 }
 
 function extractDriveFileId(url) {
@@ -1388,6 +1388,7 @@ function buildPickerHtml(allMarkers, currentList, toggleFn, newInputId) {
   }
   html += `<div class="mpick-new-row">
     <input type="text" id="${newInputId}" class="mpick-new-input" placeholder="New marker…"
+      autocapitalize="none" autocorrect="off" spellcheck="false"
       onkeydown="if(event.key==='Enter'){event.preventDefault();addNewMarker('${newInputId}')}" />
     <button type="button" class="btn-tag-add" onclick="addNewMarker('${newInputId}')">+</button>
   </div>`;
@@ -1419,7 +1420,7 @@ window.togglePosPicker = function() {
   if (opening) {
     dd.innerHTML = buildPickerHtml(uniquePosMarkers(), currentMarkers, 'toggleMarkerInPicker', 'pos-new-input');
     dd.classList.remove('hidden');
-    setTimeout(() => document.getElementById('pos-new-input')?.focus(), 50);
+    dd.scrollTop = 0;
   }
 };
 
@@ -1431,7 +1432,7 @@ window.toggleNegPicker = function() {
   if (opening) {
     dd.innerHTML = buildPickerHtml(uniqueNegMarkers(), currentNegMarkers, 'toggleNegMarkerInPicker', 'neg-new-input');
     dd.classList.remove('hidden');
-    setTimeout(() => document.getElementById('neg-new-input')?.focus(), 50);
+    dd.scrollTop = 0;
   }
 };
 
