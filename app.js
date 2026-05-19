@@ -18,27 +18,38 @@ let currentUser       = '';
 let fishData          = [];
 let filtered          = [];
 let activeStatuses    = new Set();   // empty = All
-let activePosMarkers  = new Set();
-let activeNegMarkers  = new Set();
-let currentMarkers    = [];
-let currentNegMarkers = [];
+let activePosMarkers      = new Set();
+let activeNegMarkers      = new Set();
+let activeUnsortedMarkers = new Set();
+let activeDpfMin      = null;
+let activeDpfMax      = null;
+let currentMarkers         = [];
+let currentNegMarkers      = [];
+let currentUnsortedMarkers = [];
 let currentPhotoUrl   = null;
 let originalPhotoUrl  = null;
 let pendingPhotoFile  = null;
 let currentThumbPos   = '50% 15%';
 let editingId         = null;
 let demoMode          = false;
+let selectionMode     = false;
+let selectedTankIds   = new Set();
+let selectionContext  = null;   // null | { type:'experiment'|'experiment-remove', exp }
+let lastSelectionIdx  = -1;
+let lastSelectionWasAdd = true;
 let scannerRunning    = false;
 let scanForForm       = false;
 let experiments       = [];
 let currentExperiment = null;
+let groupByColor      = false;
 let pickerSelected    = new Set();
-let sortDir           = -1;  // -1 = desc (newest first), 1 = asc
+let sortDir           = -1;  // -1 = desc (newest first for dates), 1 = asc
+let imgOff            = localStorage.getItem('fzfish-img-off') === 'true';
 
-// A  B     C         D    E      F         G            H       I      J        K      L
-// ID Line  Genotype  Date Count  Location  PosMarkers   Status  Notes  Updated  Photo  NegMarkers
+// A  B     C          D    E      F         G            H       I      J        K      L
+// ID Line  Unsorted   Date Count  Location  PosMarkers   Status  Notes  Updated  Photo  NegMarkers
 const COL = {
-  tankId:     0, line:     1, genotype:   2,
+  tankId:     0, line:     1, unsorted:   2,
   age:        3, count:    4, location:   5,
   markers:    6, status:   7, notes:      8,
   updated:    9, photo:   10, negMarkers: 11,
@@ -47,16 +58,40 @@ const COL = {
 
 // ── Demo data ────────────────────────────────────────────────────────────────
 const DEMO = [
-  { tankId:'demo-1', line:'fli1:EGFP',     genotype:'+;+', age:'2025-01-10', count:12, location:'R1 S2', markers:['EGFP','fli1'],    negMarkers:[],        status:'Active',    notes:'Healthy, spawning well', photoUrl:'', updated:'2025-04-20' },
-  { tankId:'demo-2', line:'gata1:DsRed x AB',   genotype:'+;-', age:'2025-02-01', count:8,  location:'R1A S3', markers:['DsRed','gata1'],  negMarkers:['fli1'],  status:'Breeding',  notes:'Set up breeding pair',   photoUrl:'', updated:'2025-04-22' },
-  { tankId:'demo-3', line:'casper',            genotype:'', age:'2024-12-05', count:3,  location:'R2B S3', markers:[],                 negMarkers:[],        status:'Low Stock', notes:'Need to expand',          photoUrl:'', updated:'2025-04-15' },
-  { tankId:'demo-4', line:'mpeg1:mCherry', genotype:'?', age:'2025-03-15', count:20, location:'R2A S4', markers:[], negMarkers:['DsRed'], status:'Active',    notes:'mpeg?',                       photoUrl:'', updated:'2025-04-21' },
-  { tankId:'demo-5', line:'AB WT',      genotype:'-;-', age:'2024-10-01', count:6,  location:'R3 S1', markers:[],                 negMarkers:[],        status:'Archived',  notes:'Retired breeders',        photoUrl:'', updated:'2025-03-10' },
-  { tankId:'demo-6', line:'Tg(huc:GCaMP6s)',  genotype:'+;+', age:'2025-03-01', count:15, location:'N1 S1', markers:['GCaMP6s','huc'],  negMarkers:[],        status:'Nursery',   notes:'Imaging stock',           photoUrl:'', updated:'2025-04-23' },
+  { tankId:'demo-1', line:'fli1:EGFP',     unsorted:[], age:'2025-01-10', count:12, location:'R1 S2', markers:['EGFP','fli1'],    negMarkers:[],        status:'Active',    notes:'Healthy, spawning well', photoUrl:'', updated:'2025-04-20' },
+  { tankId:'demo-2', line:'gata1:DsRed x AB',   unsorted:[], age:'2025-02-01', count:8,  location:'R1A S3', markers:['DsRed','gata1'],  negMarkers:['fli1'],  status:'Breeding',  notes:'Set up breeding pair',   photoUrl:'', updated:'2025-04-22' },
+  { tankId:'demo-3', line:'casper',            unsorted:[], age:'2024-12-05', count:3,  location:'R2B S3', markers:[],                 negMarkers:[],        status:'Low Stock', notes:'Need to expand',          photoUrl:'', updated:'2025-04-15' },
+  { tankId:'demo-4', line:'mpeg1:mCherry', unsorted:[], age:'2025-03-15', count:20, location:'R2A S4', markers:[], negMarkers:['DsRed'], status:'Active',    notes:'mpeg?',                       photoUrl:'', updated:'2025-04-21' },
+  { tankId:'demo-5', line:'AB WT',      unsorted:[], age:'2024-10-01', count:6,  location:'R3 S1', markers:[],                 negMarkers:[],        status:'Archived',  notes:'Retired breeders',        photoUrl:'', updated:'2025-03-10' },
+  { tankId:'demo-6', line:'Tg(huc:GCaMP6s)',  unsorted:[], age:'2025-03-01', count:15, location:'N1 S1', markers:['GCaMP6s','huc'],  negMarkers:[],        status:'Nursery',   notes:'Imaging stock',           photoUrl:'', updated:'2025-04-23' },
 ];
+
+// ── Location helpers ─────────────────────────────────────────────────────────
+function parseLocation(str) {
+  if (!str) return null;
+  const s = str.trim();
+  let m = s.match(/^[Rr](\d+)\s*[Ss](\d+)$/);
+  if (m) return { type: 'R', num: parseInt(m[1]), shelf: parseInt(m[2]) };
+  m = s.match(/^[Nn](\d+)\s*[Ss](\d+)$/);
+  if (m) return { type: 'N', num: parseInt(m[1]), shelf: parseInt(m[2]) };
+  if (/^[Ii]ncubator$/i.test(s)) return { type: 'I', num: null, shelf: null };
+  return null;
+}
+
+function formatLocation(type, num, shelf) {
+  if (type === 'I') return 'Incubator';
+  if (type === 'R') return `R${num} S${shelf}`;
+  if (type === 'N') return `N${num} S${shelf}`;
+  return '';
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  if (imgOff) {
+    document.getElementById('app')?.classList.add('img-off');
+    const btn = document.getElementById('img-toggle-btn');
+    if (btn) btn.style.opacity = '0.4';
+  }
   if (localStorage.getItem('fzfish-demo') === 'true') { useDemoMode(); return; }
 
   // Restore session from sessionStorage if token still valid
@@ -170,6 +205,8 @@ function showApp() {
   const signoutBtn = document.getElementById('signout-btn');
   if (signoutBtn) signoutBtn.textContent = demoMode ? 'Exit Demo' : 'Sign Out';
   renderAll();
+  // Migration wizards are intentionally not auto-triggered.
+  // Run manually via console if needed: checkLocationMigration() or checkUnsortedMigration()
 }
 
 async function fetchUserInfo() {
@@ -210,7 +247,7 @@ async function fetchFromSheets() {
       id:          r[COL.tankId]     || `row-${i+2}`,
       tankId:      r[COL.tankId]     || '',
       line:        r[COL.line]       || '',
-      genotype:    r[COL.genotype]   || '',
+      unsorted:    parseList(r[COL.unsorted]),
       age:         r[COL.age]        || '',
       count:       parseInt(r[COL.count]) || 0,
       location:    r[COL.location]   || '',
@@ -219,7 +256,7 @@ async function fetchFromSheets() {
       status:      r[COL.status]     || 'Active',
       notes:       r[COL.notes]      || '',
       updated:     r[COL.updated]    || '',
-      photoUrl:    r[COL.photo]      || '',
+      photoUrl:    normalizePhotoUrl(r[COL.photo] || ''),
       thumbPos:    r[COL.thumbPos]   || '',
       _rowIndex: i + 2,
     }));
@@ -258,7 +295,7 @@ async function deleteSheetRow(rowIndex) {
 
 function recordToRow(r) {
   return [
-    r.tankId, r.line, r.genotype, r.age, r.count, r.location,
+    r.tankId, r.line, (r.unsorted || []).join(', '), r.age, r.count, r.location,
     (r.markers    || []).join(', '),
     r.status, r.notes,
     r.updated || new Date().toISOString().slice(0, 16).replace('T', ' '),
@@ -284,26 +321,31 @@ async function fetchExperiments() {
     const reserved = new Set([TAB_NAME.toLowerCase(), 'changelog']);
     const expSheets = (json.sheets || []).map(s => s.properties).filter(p => !reserved.has(p.title.toLowerCase()));
     // Only store names/gids — tank IDs are loaded lazily when an experiment is opened
-    experiments = expSheets.map(p => ({ name: p.title, gid: p.sheetId, tankIds: null }));
+    experiments = expSheets.map(p => ({ name: p.title, gid: p.sheetId, tankIds: null, tankGroups: null }));
     renderExperimentsDropdown();
   } catch(e) { console.warn('fetchExperiments:', e.message); }
 }
 
 async function loadExpTankIds(tabName) {
   try {
-    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A2:A`);
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A2:B`);
     const d = await r.json();
-    return (d.values || []).flat().filter(Boolean);
-  } catch(e) { return []; }
+    const rows   = d.values || [];
+    const ids    = rows.map(row => row[0]).filter(Boolean);
+    const groups = {};
+    rows.forEach(row => { if (row[0] && row[1]) groups[row[0]] = row[1]; });
+    return { ids, groups };
+  } catch(e) { return { ids: [], groups: {} }; }
 }
 
-async function saveExpTankIds(tabName, tankIds) {
-  const range = `${encodeURIComponent(tabName)}!A2:A`;
+async function saveExpTankIds(tabName, tankIds, tankGroups = {}) {
+  const range = `${encodeURIComponent(tabName)}!A2:B`;
   await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}:clear`,
     { method: 'POST', headers: {'Content-Type':'application/json'} });
   if (tankIds.length) {
+    const values = tankIds.map(id => [id, tankGroups[id] || '']);
     await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}?valueInputOption=RAW`,
-      { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: tankIds.map(id => [id]) }) });
+      { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values }) });
   }
 }
 
@@ -343,14 +385,21 @@ window.enterExperiment = async function(idx) {
   // Lazy-load tank IDs the first time this experiment is opened
   if (exp.tankIds === null) {
     showToast('Loading experiment…');
-    exp.tankIds = demoMode ? [] : await loadExpTankIds(exp.name);
+    if (demoMode) {
+      exp.tankIds   = [];
+      exp.tankGroups = {};
+    } else {
+      const loaded  = await loadExpTankIds(exp.name);
+      exp.tankIds   = loaded.ids;
+      exp.tankGroups = loaded.groups;
+    }
   }
 
   const validIds = new Set(fishData.map(f => f.tankId));
   const cleaned  = exp.tankIds.filter(id => validIds.has(id));
   if (cleaned.length !== exp.tankIds.length) {
     exp.tankIds = cleaned;
-    if (!demoMode) saveExpTankIds(exp.name, cleaned);
+    if (!demoMode) saveExpTankIds(exp.name, cleaned, exp.tankGroups || {});
   }
   currentExperiment = exp;
   document.getElementById('experiment-bar').classList.remove('hidden');
@@ -365,11 +414,293 @@ window.enterExperiment = async function(idx) {
 
 window.exitExperiment = function() {
   currentExperiment = null;
+  groupByColor      = false;
+  document.getElementById('group-color-btn')?.classList.remove('active');
   document.getElementById('experiment-bar').classList.add('hidden');
   document.getElementById('filter-panel')?.classList.remove('exp-mode');
   document.getElementById('filter-toggle-bar')?.classList.remove('exp-mode');
   document.getElementById('app')?.classList.remove('in-experiment');
   renderAll();
+};
+
+// ── Selection mode ────────────────────────────────────────────────────────────
+window.enterSelectionMode = function(context) {
+  selectionMode       = true;
+  selectedTankIds     = new Set();
+  selectionContext    = context || null;
+  lastSelectionIdx    = -1;
+  lastSelectionWasAdd = true;
+  document.getElementById('selection-bar')?.classList.remove('hidden');
+  document.getElementById('sel-mode-btn')?.classList.add('active');
+  document.getElementById('app')?.classList.add('selecting');
+  updateSelectionBar();
+  renderGrid();
+};
+
+// Routes ☑ button: remove mode inside an experiment, general mode outside
+window.enterSelectionModeAuto = function() {
+  if (currentExperiment) enterSelectionModeForRemoval();
+  else enterSelectionMode(null);
+};
+
+window.toggleGroupByColor = function() {
+  groupByColor = !groupByColor;
+  document.getElementById('group-color-btn')?.classList.toggle('active', groupByColor);
+  renderGrid();
+};
+
+const GROUP_COLORS = ['green', 'red', 'blue', 'yellow'];
+const GROUP_LABELS = { green: '🟢', red: '🔴', blue: '🔵', yellow: '🟡' };
+
+window.enterSelectionModeForGroup = function(color) {
+  const exp = currentExperiment;
+  if (!exp) return;
+  enterSelectionMode({ type: 'experiment-group', exp, color });
+};
+
+window.assignGroupToSelected = async function() {
+  const ctx = selectionContext;
+  if (ctx?.type !== 'experiment-group') return;
+  const { exp, color } = ctx;
+  if (!exp.tankGroups) exp.tankGroups = {};
+  [...selectedTankIds].forEach(id => {
+    const fish = fishData.find(f => f.id === id);
+    if (!fish) return;
+    if (color === 'none') delete exp.tankGroups[fish.tankId];
+    else exp.tankGroups[fish.tankId] = color;
+  });
+  const expIdx = experiments.findIndex(e => e.gid === exp.gid);
+  if (expIdx !== -1) experiments[expIdx].tankGroups = exp.tankGroups;
+  if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups);
+  const n = selectedTankIds.size;
+  showToast(color === 'none'
+    ? `○ Cleared group for ${n} tank${n > 1 ? 's' : ''}`
+    : `${GROUP_LABELS[color]} Group assigned to ${n} tank${n > 1 ? 's' : ''}`);
+  exitSelectionMode();
+};
+
+window.enterSelectionModeForExperiment = function() {
+  const exp = currentExperiment;
+  if (!exp) return;
+  exitExperiment();                                // show all tanks
+  enterSelectionMode({ type: 'experiment', exp }); // enterSelectionMode resets selectedTankIds then calls renderGrid
+  // Pre-select tanks already in this experiment so the user can see current membership
+  if (exp.tankIds?.length) {
+    exp.tankIds.forEach(tankId => {
+      const fish = fishData.find(f => f.tankId === tankId);
+      if (fish) selectedTankIds.add(fish.id);
+    });
+    updateSelectionBar();
+    renderGrid(); // re-render now that selectedTankIds is populated
+  }
+};
+
+window.enterSelectionModeForRemoval = function() {
+  const exp = currentExperiment;
+  if (!exp) return;
+  enterSelectionMode({ type: 'experiment-remove', exp });
+};
+
+window.exitSelectionMode = function() {
+  const prevContext = selectionContext;
+  selectionMode       = false;
+  selectedTankIds     = new Set();
+  selectionContext    = null;
+  lastSelectionIdx    = -1;
+  lastSelectionWasAdd = true;
+  closeAddToExpDropdown();
+  document.getElementById('selection-bar')?.classList.add('hidden');
+  document.getElementById('sel-mode-btn')?.classList.remove('active');
+  document.getElementById('app')?.classList.remove('selecting');
+  // Re-enter the experiment if we were in add or remove context
+  if (prevContext?.type === 'experiment' || prevContext?.type === 'experiment-remove') {
+    const idx = experiments.indexOf(prevContext.exp);
+    if (idx !== -1) enterExperiment(idx);
+    else renderAll();
+  } else {
+    renderAll();
+  }
+};
+
+window.toggleCardSelection = function(id, idx, isShift) {
+  if (isShift && lastSelectionIdx >= 0 && selectionMode) {
+    // Range: apply the same add/remove operation as the anchor click
+    const start = Math.min(lastSelectionIdx, idx);
+    const end   = Math.max(lastSelectionIdx, idx);
+    for (let i = start; i <= end; i++) {
+      const f = filtered[i];
+      if (!f) continue;
+      if (lastSelectionWasAdd) selectedTankIds.add(f.id);
+      else selectedTankIds.delete(f.id);
+    }
+    // Don't update lastSelectionIdx — keep anchor for chained shift-clicks
+  } else {
+    if (selectedTankIds.has(id)) { selectedTankIds.delete(id); lastSelectionWasAdd = false; }
+    else                         { selectedTankIds.add(id);    lastSelectionWasAdd = true;  }
+    lastSelectionIdx = (idx !== undefined) ? idx : -1;
+  }
+  // Update all card visuals in-place (no full re-render → preserves scroll)
+  document.querySelectorAll('.fish-card').forEach(card => {
+    const cardId = card.dataset.id;
+    const sel    = selectedTankIds.has(cardId);
+    card.classList.toggle('card-selected', sel);
+    const dot = card.querySelector('.card-sel-dot');
+    if (dot) dot.classList.toggle('card-sel-dot-on', sel);
+  });
+  updateSelectionBar();
+};
+
+function updateSelectionBar() {
+  const n       = selectedTankIds.size;
+  const confirm = document.getElementById('sel-confirm-btn');
+  const remove  = document.getElementById('sel-remove-btn');
+  const addWrap = document.getElementById('sel-add-exp-wrap');
+  const del     = document.getElementById('sel-delete-btn');
+  const label   = document.getElementById('sel-count-label');
+  if (label) label.textContent = n === 1 ? '1 selected' : `${n} selected`;
+
+  if (selectionContext?.type === 'experiment') {
+    // Sync-tanks context: confirm saves current selection as experiment membership
+    const expName = selectionContext.exp.name;
+    if (confirm) { confirm.textContent = `✓ Save "${expName}" (${n})`; confirm.classList.remove('hidden'); }
+    if (remove)  remove.classList.add('hidden');
+    if (addWrap) addWrap.classList.add('hidden');
+    if (del)     del.classList.add('hidden');
+  } else if (selectionContext?.type === 'experiment-remove') {
+    // Remove context: confirm button removes from experiment
+    const expName = selectionContext.exp.name;
+    if (remove)  { remove.textContent = `✕ Remove ${n} from "${expName}"`; remove.classList.toggle('hidden', n === 0); }
+    if (confirm) confirm.classList.add('hidden');
+    if (addWrap) addWrap.classList.add('hidden');
+    if (del)     del.classList.add('hidden');
+  } else if (selectionContext?.type === 'experiment-group') {
+    // Group-assign context: confirm button assigns color
+    const { color } = selectionContext;
+    const colorLabel = color === 'none' ? '○ Clear group' : `${GROUP_LABELS[color]} Assign`;
+    if (confirm) { confirm.textContent = `${colorLabel} (${n} tank${n !== 1 ? 's' : ''})`; confirm.className = `sel-btn${color !== 'none' ? ' btn-group-' + color : ''}`; confirm.classList.toggle('hidden', n === 0); confirm.onclick = assignGroupToSelected; }
+    if (remove)  remove.classList.add('hidden');
+    if (addWrap) addWrap.classList.add('hidden');
+    if (del)     del.classList.add('hidden');
+  } else {
+    // General mode: add-to-experiment dropdown + delete
+    if (confirm) confirm.classList.add('hidden');
+    if (remove)  remove.classList.add('hidden');
+    if (addWrap) addWrap.classList.toggle('hidden', n === 0);
+    if (del)     del.classList.toggle('hidden', n === 0);
+  }
+}
+
+// ── Add-to-experiment dropdown (general selection mode) ───────────────────────
+function buildAddToExpDropdown() {
+  const dd = document.getElementById('sel-add-exp-dd');
+  if (!dd) return;
+  if (!experiments.length) {
+    dd.innerHTML = '<div class="sel-add-exp-empty">No experiments yet</div>';
+    return;
+  }
+  dd.innerHTML = experiments.map(exp =>
+    `<button class="sel-add-exp-row" onclick='addSelectedToExperiment(${JSON.stringify(exp.name)})'>${esc(exp.name)}</button>`
+  ).join('');
+}
+
+let _addExpDdOpen = false;
+window.toggleAddToExpDropdown = function(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('sel-add-exp-dd');
+  if (!dd) return;
+  _addExpDdOpen = !_addExpDdOpen;
+  if (_addExpDdOpen) {
+    buildAddToExpDropdown();
+    dd.classList.remove('hidden');
+    // Close when clicking outside
+    setTimeout(() => document.addEventListener('click', closeAddToExpDropdown, { once: true }), 0);
+  } else {
+    dd.classList.add('hidden');
+  }
+};
+
+function closeAddToExpDropdown() {
+  _addExpDdOpen = false;
+  document.getElementById('sel-add-exp-dd')?.classList.add('hidden');
+}
+
+window.addSelectedToExperiment = async function(expName) {
+  const exp = experiments.find(e => e.name === expName);
+  if (!exp) return;
+  if (exp.tankIds === null) {
+    if (demoMode) { exp.tankIds = []; exp.tankGroups = {}; }
+    else { const l = await loadExpTankIds(exp.name); exp.tankIds = l.ids; exp.tankGroups = l.groups; }
+  }
+  // selectedTankIds holds UUIDs (f.id) — map to tankId strings for experiment storage
+  const tankIds = [...selectedTankIds]
+    .map(uid => fishData.find(f => f.id === uid)?.tankId).filter(Boolean);
+  const newIds = tankIds.filter(tid => !exp.tankIds.includes(tid));
+  if (newIds.length) {
+    exp.tankIds = [...exp.tankIds, ...newIds];
+    if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
+    showToast(`✅ Added ${newIds.length} tank${newIds.length > 1 ? 's' : ''} to "${expName}"`);
+  } else {
+    showToast('Already in that experiment');
+  }
+  exitSelectionMode();
+};
+
+window.confirmSelectionAction = async function() {
+  if (selectionContext?.type === 'experiment') {
+    // Sync experiment membership to exactly what's selected
+    // selectedTankIds has UUIDs — convert to tankId strings
+    const exp      = selectionContext.exp;
+    const newList  = [...selectedTankIds]
+      .map(uid => fishData.find(f => f.id === uid)?.tankId).filter(Boolean);
+    const added    = newList.filter(tid => !exp.tankIds.includes(tid)).length;
+    const removed  = exp.tankIds.filter(tid => !newList.includes(tid)).length;
+    // Clean up group assignments for removed tanks
+    exp.tankIds.filter(tid => !newList.includes(tid))
+      .forEach(tid => { if (exp.tankGroups) delete exp.tankGroups[tid]; });
+    exp.tankIds = newList;
+    if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
+    const parts = [];
+    if (added)   parts.push(`+${added} added`);
+    if (removed) parts.push(`−${removed} removed`);
+    showToast(parts.length ? `✅ ${parts.join(', ')}` : '✅ No changes');
+    exitSelectionMode();
+  } else if (selectionContext?.type === 'experiment-remove') {
+    // Remove tanks from experiment (not from sheet)
+    const exp       = selectionContext.exp;
+    // selectedTankIds has UUIDs — resolve to tankId strings
+    const tankIds   = [...selectedTankIds]
+      .map(uid => fishData.find(f => f.id === uid)?.tankId).filter(Boolean);
+    const n = tankIds.length;
+    if (!confirm(`Remove ${n} tank${n > 1 ? 's' : ''} from "${exp.name}"? This can't be undone.`)) return;
+    // Purge group assignments (keyed by tankId)
+    tankIds.forEach(tid => { if (exp.tankGroups) delete exp.tankGroups[tid]; });
+    exp.tankIds    = exp.tankIds.filter(tid => !tankIds.includes(tid));
+    const expIdx   = experiments.findIndex(e => e.gid === exp.gid);
+    if (expIdx !== -1) { experiments[expIdx].tankIds = exp.tankIds; experiments[expIdx].tankGroups = exp.tankGroups; }
+    if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
+    showToast(`✕ Removed ${n} tank${n > 1 ? 's' : ''} from "${exp.name}"`);
+    exitSelectionMode();
+  }
+};
+
+window.deleteSelected = async function() {
+  const n = selectedTankIds.size;
+  if (!n) return;
+  if (!confirm(`Delete ${n} tank${n > 1 ? 's' : ''} from inventory? This can't be undone.`)) return;
+  const ids = [...selectedTankIds];
+  for (const id of ids) {
+    const fish = fishData.find(f => f.id === id);
+    if (!fish) continue;
+    if (fish.photoUrl && !demoMode) deleteDrivePhoto(fish.photoUrl);
+    if (!demoMode) {
+      await deleteSheetRow(fish._rowIndex);
+      fishData.forEach(f => { if (f._rowIndex > fish._rowIndex) f._rowIndex--; });
+      logChange('Deleted', fish, []);
+    }
+    fishData = fishData.filter(f => f.id !== id);
+  }
+  showToast(`🗑 Deleted ${ids.length} tank${ids.length > 1 ? 's' : ''}`);
+  exitSelectionMode();
 };
 
 window.startRenameExp = function() {
@@ -413,7 +744,7 @@ window.createExperiment = async function() {
   if (!name?.trim()) return;
   const trimmed = name.trim();
   if (demoMode) {
-    const exp = { name: trimmed, gid: Date.now(), tankIds: [] };
+    const exp = { name: trimmed, gid: Date.now(), tankIds: [], tankGroups: {} };
     experiments.push(exp);
     enterExperiment(experiments.length - 1);
     return;
@@ -428,9 +759,9 @@ window.createExperiment = async function() {
     const props = d.replies[0].addSheet.properties;
     await authFetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(trimmed)}!A1?valueInputOption=RAW`,
-      { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: [['Tank ID']] }) }
+      { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: [['Tank ID', 'Group']] }) }
     );
-    const exp = { name: props.title, gid: props.sheetId, tankIds: [] };
+    const exp = { name: props.title, gid: props.sheetId, tankIds: [], tankGroups: {} };
     experiments.push(exp);
     enterExperiment(experiments.length - 1);
   } catch(e) { showToast('❌ ' + e.message); }
@@ -438,7 +769,7 @@ window.createExperiment = async function() {
 
 window.deleteExperiment = async function() {
   if (!currentExperiment) return;
-  if (!confirm(`Delete "${currentExperiment.name}"? This cannot be undone.`)) return;
+  if (!confirm(`Delete experiment "${currentExperiment.name}"? This can't be undone.`)) return;
   const exp = currentExperiment;
   exitExperiment();
   experiments = experiments.filter(e => e.gid !== exp.gid);
@@ -455,10 +786,12 @@ window.deleteExperiment = async function() {
 window.removeFromExperiment = function(tankId, event) {
   event.stopPropagation();
   if (!currentExperiment) return;
+  if (!confirm(`Remove this tank from "${currentExperiment.name}"? This can't be undone.`)) return;
+  if (currentExperiment.tankGroups) delete currentExperiment.tankGroups[tankId];
   currentExperiment.tankIds = currentExperiment.tankIds.filter(id => id !== tankId);
   const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
-  if (idx !== -1) experiments[idx].tankIds = currentExperiment.tankIds;
-  if (!demoMode) saveExpTankIds(currentExperiment.name, currentExperiment.tankIds);
+  if (idx !== -1) { experiments[idx].tankIds = currentExperiment.tankIds; experiments[idx].tankGroups = currentExperiment.tankGroups; }
+  if (!demoMode) saveExpTankIds(currentExperiment.name, currentExperiment.tankIds, currentExperiment.tankGroups || {});
   renderAll();
 };
 
@@ -700,7 +1033,7 @@ function renderPickerGrid() {
     if (!q) return true;
     return (
       f.line.toLowerCase().includes(q) ||
-      (f.genotype || '').toLowerCase().includes(q) ||
+      (f.unsorted || []).join(' ').toLowerCase().includes(q) ||
       (f.location || '').toLowerCase().includes(q) ||
       (f.tankId   || '').toLowerCase().includes(q) ||
       (f.markers  || []).some(m => m.toLowerCase().includes(q))
@@ -756,7 +1089,7 @@ window.confirmTankPicker = async function() {
   const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
   if (idx !== -1) experiments[idx].tankIds = currentExperiment.tankIds;
   if (!demoMode) {
-    try { await saveExpTankIds(currentExperiment.name, currentExperiment.tankIds); }
+    try { await saveExpTankIds(currentExperiment.name, currentExperiment.tankIds, currentExperiment.tankGroups || {}); }
     catch(e) { showToast('❌ ' + e.message); if (btn) { btn.disabled = false; updatePickerBtn(); } return; }
   }
   closeTankPicker();
@@ -769,7 +1102,6 @@ window.confirmTankPicker = async function() {
 function diffRecord(oldRec, newRec) {
   const fields = [
     { key: 'line',     label: 'Line'       },
-    { key: 'genotype', label: 'Genotype'   },
     { key: 'age',      label: 'Fert. Date' },
     { key: 'count',    label: 'Count'      },
     { key: 'location', label: 'Location'   },
@@ -789,6 +1121,9 @@ function diffRecord(oldRec, newRec) {
   const oldNeg = (oldRec.negMarkers || []).join(', ') || '—';
   const newNeg = (newRec.negMarkers || []).join(', ') || '—';
   if (oldNeg !== newNeg) changes.push(`−Markers: [${oldNeg}] → [${newNeg}]`);
+  const oldUnsorted = (oldRec.unsorted || []).join(', ') || '—';
+  const newUnsorted = (newRec.unsorted || []).join(', ') || '—';
+  if (oldUnsorted !== newUnsorted) changes.push(`?Markers: [${oldUnsorted}] → [${newUnsorted}]`);
   // Photo
   const hadPhoto = !!oldRec.photoUrl;
   const hasPhoto = !!newRec.photoUrl;
@@ -846,8 +1181,22 @@ async function uploadPhoto(file) {
 }
 
 function extractDriveFileId(url) {
-  const m = (url || '').match(/[?&]id=([^&]+)/);
-  return m ? m[1] : null;
+  if (!url) return null;
+  // lh3 CDN format: lh3.googleusercontent.com/d/FILEID=w800
+  const lh3 = url.match(/lh3\.googleusercontent\.com\/d\/([^?=\s]+)/);
+  if (lh3) return lh3[1];
+  // Old thumbnail format: ?id=FILEID or &id=FILEID
+  const thumb = url.match(/[?&]id=([^&]+)/);
+  if (thumb) return thumb[1];
+  return null;
+}
+
+// Convert any stored Drive URL to the cookie-free lh3 CDN format
+function normalizePhotoUrl(url) {
+  if (!url) return '';
+  if (url.includes('lh3.googleusercontent.com')) return url; // already correct
+  const id = extractDriveFileId(url);
+  return id ? `https://lh3.googleusercontent.com/d/${id}=w800` : url;
 }
 
 async function deleteDrivePhoto(photoUrl) {
@@ -892,12 +1241,13 @@ function esc(s) {
 
 function updateStats() {
   const count = s => fishData.filter(f => f.status === s).length;
-  document.getElementById('stat-total').textContent     = fishData.length;
-  document.getElementById('stat-active').textContent    = count('Active');
-  document.getElementById('stat-nursery').textContent   = count('Nursery');
-  document.getElementById('stat-incubator').textContent = count('Incubator');
-  document.getElementById('stat-low').textContent       = count('Low Stock');
-  document.getElementById('stat-archived').textContent  = count('Archived');
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('stat-total',     fishData.length);
+  set('stat-active',    count('Active'));
+  set('stat-nursery',   count('Nursery'));
+  set('stat-incubator', count('Incubator'));
+  set('stat-low',       count('Low Stock'));
+  set('stat-archived',  count('Archived'));
 }
 
 window.filterFish = function() {
@@ -907,10 +1257,12 @@ window.filterFish = function() {
     : fishData;
 
   // Purge stale marker filters (marker deleted from all tanks)
-  const allPos = new Set(base.flatMap(f => f.markers    || []));
-  const allNeg = new Set(base.flatMap(f => f.negMarkers || []));
-  for (const m of [...activePosMarkers]) { if (!allPos.has(m)) activePosMarkers.delete(m); }
-  for (const m of [...activeNegMarkers]) { if (!allNeg.has(m)) activeNegMarkers.delete(m); }
+  const allPos      = new Set(base.flatMap(f => f.markers    || []));
+  const allNeg      = new Set(base.flatMap(f => f.negMarkers || []));
+  const allUnsorted = new Set(base.flatMap(f => f.unsorted   || []));
+  for (const m of [...activePosMarkers])      { if (!allPos.has(m))      activePosMarkers.delete(m); }
+  for (const m of [...activeNegMarkers])      { if (!allNeg.has(m))      activeNegMarkers.delete(m); }
+  for (const m of [...activeUnsortedMarkers]) { if (!allUnsorted.has(m)) activeUnsortedMarkers.delete(m); }
 
   filtered = base.filter(f => {
     if (activeStatuses.size > 0 && !activeStatuses.has(f.status)) return false;
@@ -922,13 +1274,23 @@ window.filterFish = function() {
       const s = new Set(f.negMarkers || []);
       for (const m of activeNegMarkers) { if (!s.has(m)) return false; }
     }
+    if (activeUnsortedMarkers.size > 0) {
+      const s = new Set(f.unsorted || []);
+      for (const m of activeUnsortedMarkers) { if (!s.has(m)) return false; }
+    }
+    if (activeDpfMin !== null || activeDpfMax !== null) {
+      const dpf = f.age ? Math.floor((Date.now() - new Date(f.age + 'T00:00:00')) / 86400000) : null;
+      if (dpf === null) return false;
+      if (activeDpfMin !== null && dpf < activeDpfMin) return false;
+      if (activeDpfMax !== null && dpf > activeDpfMax) return false;
+    }
     if (!q) return true;
     return (
-      f.line.toLowerCase().includes(q)      ||
-      f.genotype.toLowerCase().includes(q)  ||
-      f.location.toLowerCase().includes(q)  ||
-      (f.markers    || []).some(m => m.toLowerCase().includes(q)) ||
-      (f.negMarkers || []).some(m => m.toLowerCase().includes(q)) ||
+      f.line.toLowerCase().includes(q)                                    ||
+      (f.unsorted || []).join(' ').toLowerCase().includes(q)              ||
+      f.location.toLowerCase().includes(q)                                ||
+      (f.markers    || []).some(m => m.toLowerCase().includes(q))         ||
+      (f.negMarkers || []).some(m => m.toLowerCase().includes(q))         ||
       (f.notes      || '').toLowerCase().includes(q)
     );
   });
@@ -955,39 +1317,76 @@ window.toggleSortDir = function() {
   sortFish();
 };
 
+const GROUP_COLOR_ORDER = { green: 0, red: 1, blue: 2, yellow: 3 };
+const GROUP_COLOR_LABELS = { green: '🟢 Green', red: '🔴 Red', blue: '🔵 Blue', yellow: '🟡 Yellow' };
+
 function renderGrid() {
   const grid  = document.getElementById('fish-grid');
   const empty = document.getElementById('empty-state');
-  Array.from(grid.querySelectorAll('.fish-card')).forEach(c => c.remove());
+  // Remove cards AND group headers from previous render
+  Array.from(grid.children).forEach(c => { if (c !== empty) c.remove(); });
   if (filtered.length === 0) { empty.style.display = 'flex'; return; }
   empty.style.display = 'none';
 
+  // When groupByColor is active inside an experiment, stable-sort filtered
+  // by color (preserves the existing within-group sort order).
+  if (groupByColor && currentExperiment) {
+    filtered.sort((a, b) => {
+      const ac = GROUP_COLOR_ORDER[currentExperiment.tankGroups?.[a.tankId]] ?? 99;
+      const bc = GROUP_COLOR_ORDER[currentExperiment.tankGroups?.[b.tankId]] ?? 99;
+      return ac - bc;
+    });
+  }
+
+  let lastColor = undefined; // sentinel — tracks when the group changes
+
   filtered.forEach((f, idx) => {
+    // Insert a section header whenever the color group changes (only in group mode)
+    if (groupByColor && currentExperiment) {
+      const color = currentExperiment.tankGroups?.[f.tankId] || null;
+      if (color !== lastColor) {
+        lastColor = color;
+        const hdr = document.createElement('div');
+        hdr.className = `exp-group-header${color ? ` exp-group-header-${color}` : ' exp-group-header-none'}`;
+        hdr.innerHTML = color
+          ? `<span class="exp-group-hdr-dot"></span>${GROUP_COLOR_LABELS[color]}`
+          : `<span class="exp-group-hdr-dot"></span>Ungrouped`;
+        grid.appendChild(hdr);
+      }
+    }
+
     const card    = document.createElement('div');
-    card.className = `fish-card status-${f.status}`;
+    const isSel   = selectionMode && selectedTankIds.has(f.id);
+    const groupColor = currentExperiment?.tankGroups?.[f.tankId] || null;
+    card.className = `fish-card status-${f.status}${isSel ? ' card-selected' : ''}${groupColor ? ` card-group-${groupColor}` : ''}`;
+    card.dataset.id = f.id;
     card.style.animationDelay = `${idx * 0.04}s`;
 
-    const posHtml   = (f.markers    || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
-    const negHtml   = (f.negMarkers || []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join('');
+    const posHtml      = (f.markers    || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
+    const negHtml      = (f.negMarkers || []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join('');
+    const unsortedHtml = (f.unsorted  || []).map(m => `<span class="m-tag m-tag-unsorted">${esc(m)}</span>`).join('');
     const thumbHtml = f.photoUrl ? `<img class="card-thumb" src="${esc(f.photoUrl)}" loading="lazy" style="object-position:${esc(f.thumbPos || '50% 15%')}" />` : '';
+    const groupDot  = groupColor ? `<div class="card-group-dot card-group-dot-${groupColor}" title="Group: ${groupColor}"></div>` : '';
+
+    const selDot = selectionMode
+      ? `<div class="card-sel-dot${isSel ? ' card-sel-dot-on' : ''}"></div>` : '';
 
     card.innerHTML = `
-      ${thumbHtml}
+      ${selDot}${groupDot}${thumbHtml}
       <div class="card-header">
         <span class="fert-date">${f.age ? formatDate(f.age) + ' · ' + calcDpf(f.age) + ' dpf' : ''}</span>
         <span class="status-badge badge-${f.status}">${esc(f.status)}</span>
       </div>
       <div class="line-name">${esc(f.line)}</div>
-      ${f.genotype ? `<div class="genotype">${esc(f.genotype)}</div>` : ''}
       <div class="card-meta">
         ${f.count    ? `<span class="meta-item"><span class="meta-icon">🐟</span>${f.count}</span>` : ''}
         ${f.location ? `<span class="meta-item"><span class="meta-icon">📍</span>${esc(f.location)}</span>` : ''}
       </div>
-      ${(posHtml || negHtml) ? `<div class="card-markers">${posHtml}${negHtml}</div>` : ''}
+      ${(posHtml || negHtml || unsortedHtml) ? `<div class="card-markers">${posHtml}${negHtml}${unsortedHtml}</div>` : ''}
       <div class="card-footer">
         <span class="tank-id">${esc(f.tankId || '')}</span>
         <div class="card-actions">
-          ${currentExperiment
+          ${selectionMode ? '' : currentExperiment
             ? `<button class="card-btn danger" onclick="removeFromExperiment('${esc(f.tankId)}', event)">✕ Remove</button>`
             : `<button class="card-btn" onclick="event.stopPropagation();openEditModal('${esc(f.id)}')">Edit</button>
           <button class="card-btn danger" onclick="event.stopPropagation();deleteFish('${esc(f.id)}')">Delete</button>`
@@ -995,19 +1394,21 @@ function renderGrid() {
         </div>
       </div>
     `;
-    card.addEventListener('click', () => openDrawer(f.id));
+    card.addEventListener('click', (e) => selectionMode ? toggleCardSelection(f.id, idx, e.shiftKey) : openDrawer(f.id));
     grid.appendChild(card);
   });
 }
 
 // ── Marker datalists & dropdowns ──────────────────────────────────────────────
-function uniquePosMarkers() { return [...new Set(fishData.flatMap(f => f.markers    || []))].sort(); }
-function uniqueNegMarkers() { return [...new Set(fishData.flatMap(f => f.negMarkers || []))].sort(); }
+function uniquePosMarkers()      { return [...new Set(fishData.flatMap(f => f.markers    || []))].sort(); }
+function uniqueNegMarkers()      { return [...new Set(fishData.flatMap(f => f.negMarkers || []))].sort(); }
+function uniqueUnsortedMarkers() { return [...new Set(fishData.flatMap(f => f.unsorted   || []))].sort(); }
 
 function updateMarkerDatalists() {
   const fill = (id, items) => { const el = document.getElementById(id); if (el) el.innerHTML = items.map(m => `<option value="${esc(m)}">`).join(''); };
-  fill('markers-datalist',     uniquePosMarkers());
-  fill('neg-markers-datalist', uniqueNegMarkers());
+  fill('markers-datalist',         uniquePosMarkers());
+  fill('neg-markers-datalist',     uniqueNegMarkers());
+  fill('unsorted-markers-datalist', uniqueUnsortedMarkers());
 }
 
 function buildDropdownHtml(markers, activeSet, toggleFn) {
@@ -1029,7 +1430,8 @@ function positionDropdown(dropdown, btnId) {
 window.togglePosDropdown = function() {
   const dd = document.getElementById('pos-dropdown');
   if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
-  document.getElementById('neg-dropdown').classList.add('hidden');
+  document.getElementById('neg-dropdown')?.classList.add('hidden');
+  document.getElementById('unsorted-dropdown')?.classList.add('hidden');
   positionDropdown(dd, 'pos-filter-btn');
   dd.innerHTML = buildDropdownHtml(uniquePosMarkers(), activePosMarkers, 'togglePosFilter');
   dd.classList.remove('hidden');
@@ -1038,10 +1440,25 @@ window.togglePosDropdown = function() {
 window.toggleNegDropdown = function() {
   const dd = document.getElementById('neg-dropdown');
   if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
-  document.getElementById('pos-dropdown').classList.add('hidden');
+  document.getElementById('pos-dropdown')?.classList.add('hidden');
+  document.getElementById('unsorted-dropdown')?.classList.add('hidden');
   positionDropdown(dd, 'neg-filter-btn');
   dd.innerHTML = buildDropdownHtml(uniqueNegMarkers(), activeNegMarkers, 'toggleNegFilter');
   dd.classList.remove('hidden');
+};
+
+window.toggleUnsortedDropdown = function() {
+  const dd = document.getElementById('unsorted-dropdown');
+  if (!dd) return;
+  const isHidden = dd.classList.contains('hidden');
+  document.getElementById('pos-dropdown')?.classList.add('hidden');
+  document.getElementById('neg-dropdown')?.classList.add('hidden');
+  document.getElementById('unsorted-dropdown')?.classList.add('hidden');
+  if (isHidden) {
+    positionDropdown(dd, 'unsorted-filter-btn');
+    dd.innerHTML = buildDropdownHtml(uniqueUnsortedMarkers(), activeUnsortedMarkers, 'toggleUnsortedFilter');
+    dd.classList.remove('hidden');
+  }
 };
 
 window.togglePosFilter = function(m, checked) {
@@ -1060,11 +1477,19 @@ window.toggleNegFilter = function(m, checked) {
   updateFilterSummary(); filterFish();
 };
 
+window.toggleUnsortedFilter = function(m, checked) {
+  if (checked) activeUnsortedMarkers.add(m); else activeUnsortedMarkers.delete(m);
+  const c = activeUnsortedMarkers.size;
+  document.getElementById('unsorted-filter-count').textContent = c > 0 ? ` (${c})` : '';
+  document.getElementById('unsorted-filter-btn').classList.toggle('active', c > 0);
+  updateFilterSummary(); filterFish();
+};
+
 // Close dropdowns on outside click
 document.addEventListener('click', e => {
-  ['pos-filter-wrap','neg-filter-wrap'].forEach(id => {
+  ['pos-filter-wrap','neg-filter-wrap','unsorted-filter-wrap'].forEach(id => {
     const wrap = document.getElementById(id);
-    const ddId = id === 'pos-filter-wrap' ? 'pos-dropdown' : 'neg-dropdown';
+    const ddId = id === 'pos-filter-wrap' ? 'pos-dropdown' : id === 'neg-filter-wrap' ? 'neg-dropdown' : 'unsorted-dropdown';
     if (wrap && !wrap.contains(e.target)) document.getElementById(ddId)?.classList.add('hidden');
   });
   const expWrap = document.getElementById('exp-btn-wrap') || document.querySelector('.exp-btn-wrap');
@@ -1086,13 +1511,38 @@ window.clearFilters = function() {
   activeStatuses.clear();
   activePosMarkers.clear();
   activeNegMarkers.clear();
+  activeUnsortedMarkers.clear();
+  activeDpfMin = null; activeDpfMax = null;
+  const dMin = document.getElementById('dpf-min');
+  const dMax = document.getElementById('dpf-max');
+  if (dMin) dMin.value = '';
+  if (dMax) dMax.value = '';
   document.getElementById('pos-filter-count').textContent = '';
   document.getElementById('neg-filter-count').textContent = '';
+  document.getElementById('unsorted-filter-count').textContent = '';
   document.getElementById('pos-filter-btn')?.classList.remove('active');
   document.getElementById('neg-filter-btn')?.classList.remove('active');
+  document.getElementById('unsorted-filter-btn')?.classList.remove('active');
   refreshChips();
   updateFilterSummary();
   filterFish();
+};
+
+window.applyDpfFilter = function() {
+  const minVal = document.getElementById('dpf-min')?.value;
+  const maxVal = document.getElementById('dpf-max')?.value;
+  activeDpfMin = minVal !== '' && minVal != null ? parseInt(minVal) : null;
+  activeDpfMax = maxVal !== '' && maxVal != null ? parseInt(maxVal) : null;
+  updateFilterSummary();
+  filterFish();
+};
+
+window.toggleImgMode = function() {
+  imgOff = !imgOff;
+  localStorage.setItem('fzfish-img-off', imgOff);
+  document.getElementById('app')?.classList.toggle('img-off', imgOff);
+  const btn = document.getElementById('img-toggle-btn');
+  if (btn) btn.style.opacity = imgOff ? '0.4' : '1';
 };
 
 function refreshChips() {
@@ -1103,7 +1553,8 @@ function refreshChips() {
 }
 
 function updateFilterSummary() {
-  const total = activeStatuses.size + activePosMarkers.size + activeNegMarkers.size;
+  const dpfActive = (activeDpfMin !== null || activeDpfMax !== null) ? 1 : 0;
+  const total = activeStatuses.size + activePosMarkers.size + activeNegMarkers.size + activeUnsortedMarkers.size + dpfActive;
   const countEl = document.getElementById('filter-active-count');
   if (countEl) countEl.textContent = total > 0 ? ` (${total})` : '';
   document.getElementById('reset-filters-btn')?.classList.toggle('hidden', total === 0);
@@ -1126,11 +1577,19 @@ window.clearAllMobileFilters = function() {
   activeStatuses.clear();
   activePosMarkers.clear();
   activeNegMarkers.clear();
+  activeUnsortedMarkers.clear();
+  activeDpfMin = null; activeDpfMax = null;
+  const dMin = document.getElementById('dpf-min');
+  const dMax = document.getElementById('dpf-max');
+  if (dMin) dMin.value = '';
+  if (dMax) dMax.value = '';
   refreshChips();
   document.getElementById('pos-filter-count').textContent = '';
   document.getElementById('neg-filter-count').textContent = '';
+  document.getElementById('unsorted-filter-count').textContent = '';
   document.getElementById('pos-filter-btn').classList.remove('active');
   document.getElementById('neg-filter-btn').classList.remove('active');
+  document.getElementById('unsorted-filter-btn')?.classList.remove('active');
   updateFilterSummary();
   filterFish();
   buildMobileFilterSheet();
@@ -1220,6 +1679,21 @@ window.buildMobileFilterSheet = function() {
     html += '</div>';
   }
 
+  // ── ? Unsorted Markers ──
+  const um = [...new Set(baseData.flatMap(f => f.unsorted || []))].sort();
+  if (um.length) {
+    html += '<div class="mf-section"><div class="mf-section-title">? Markers (unsorted)</div>';
+    um.forEach(m => {
+      const on = activeUnsortedMarkers.has(m);
+      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+          onclick="toggleUnsortedFilter('${esc(m)}',${!on});buildMobileFilterSheet()">
+        <span class="mf-check">${on ? '✓' : ''}</span>
+        <span class="mf-row-label mf-marker-unsorted">${esc(m)}</span>
+      </button>`;
+    });
+    html += '</div>';
+  }
+
   body.innerHTML = html;
 };
 
@@ -1257,9 +1731,263 @@ function checkScrollLock() {
   document.body.classList.toggle('modal-open', anyOverlay || !!drawerOpen);
 }
 
+// ── Location picker (form) ───────────────────────────────────────────────────
+function updateLocPicker() {
+  const type = document.querySelector('input[name="loc-type"]:checked')?.value || 'R';
+  const row  = document.getElementById('loc-selects-row');
+  if (!row) return;
+  if (type === 'I') { row.classList.add('hidden'); updateLocPreview(); return; }
+  row.classList.remove('hidden');
+  updateLocPreview();
+}
+
+function updateLocPreview() {
+  const type  = document.querySelector('input[name="loc-type"]:checked')?.value || 'R';
+  const num   = document.getElementById('loc-num')?.value || '1';
+  const shelf = document.getElementById('loc-shelf')?.value || '1';
+  const el    = document.getElementById('loc-preview');
+  if (el) el.textContent = formatLocation(type, num, shelf);
+}
+
+function getLocFromForm() {
+  const type  = document.querySelector('input[name="loc-type"]:checked')?.value || 'R';
+  const num   = document.getElementById('loc-num')?.value || '1';
+  const shelf = document.getElementById('loc-shelf')?.value || '1';
+  return formatLocation(type, num, shelf);
+}
+
+function setLocInForm(str) {
+  const parsed = parseLocation(str);
+  const type   = parsed?.type || 'R';
+  const num    = parsed?.num  || 1;
+  const shelf  = parsed?.shelf || 1;
+  const radio  = document.querySelector(`input[name="loc-type"][value="${type}"]`);
+  if (radio) radio.checked = true;
+  updateLocPicker();
+  const numEl   = document.getElementById('loc-num');
+  const shelfEl = document.getElementById('loc-shelf');
+  if (numEl)   numEl.value   = num;
+  if (shelfEl) shelfEl.value = shelf;
+  updateLocPreview();
+}
+
+// ── Migration wizards (dev access only — not auto-triggered) ──────────────────
+// To run from browser console: checkLocationMigration() or checkUnsortedMigration()
+window.checkLocationMigration = checkLocationMigration;
+window.checkUnsortedMigration = checkUnsortedMigration;
+
+// ── Location migration wizard ─────────────────────────────────────────────────
+function checkLocationMigration() {
+  if (demoMode) return;
+  if (localStorage.getItem('fzfish-loc-migrated') === 'true') return;
+  const bad = fishData.filter(f => f.location && !parseLocation(f.location));
+  if (!bad.length) { localStorage.setItem('fzfish-loc-migrated', 'true'); return; }
+  openLocMigrate(bad);
+}
+
+function openLocMigrate(tanks) {
+  const list = document.getElementById('loc-migrate-list');
+  if (!list) return;
+  list.innerHTML = tanks.map(f => {
+    const id = f.tankId || f.id;
+    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `
+    <div class="mig-row" id="mig-row-${safeId}" data-tank-id="${esc(id)}">
+      <div class="mig-info">
+        <span class="mig-line">${esc(f.line || f.tankId)}</span>
+        <span class="mig-old">was: <em>${esc(f.location)}</em></span>
+      </div>
+      <div class="mig-picker">
+        <label class="mig-type-opt"><input type="radio" name="mig-type-${safeId}" value="R" checked onchange="updateMigRow('${safeId}')"> Rack</label>
+        <label class="mig-type-opt"><input type="radio" name="mig-type-${safeId}" value="N" onchange="updateMigRow('${safeId}')"> Nursery</label>
+        <label class="mig-type-opt"><input type="radio" name="mig-type-${safeId}" value="I" onchange="updateMigRow('${safeId}')"> Incubator</label>
+        <div class="mig-selects" id="mig-selects-${safeId}">
+          <input id="mig-num-${safeId}" class="loc-select loc-num-input" type="text" maxlength="1" inputmode="numeric" placeholder="1" value="1" oninput="updateMigPreview('${safeId}')" />
+          <span class="loc-select-label">S</span>
+          <input id="mig-shelf-${safeId}" class="loc-select loc-num-input" type="text" maxlength="1" inputmode="numeric" placeholder="1" value="1" oninput="updateMigPreview('${safeId}')" />
+        </div>
+        <span class="loc-preview" id="mig-preview-${safeId}">R1 S1</span>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('loc-migrate-overlay').classList.add('active');
+  checkScrollLock();
+}
+
+window.updateMigRow = function(safeId) {
+  const type    = document.querySelector(`input[name="mig-type-${safeId}"]:checked`)?.value || 'R';
+  const selects = document.getElementById(`mig-selects-${safeId}`);
+  if (type === 'I') selects?.classList.add('hidden');
+  else              selects?.classList.remove('hidden');
+  updateMigPreview(safeId);
+};
+
+window.updateMigPreview = function(safeId) {
+  const type  = document.querySelector(`input[name="mig-type-${safeId}"]:checked`)?.value || 'R';
+  const num   = document.getElementById(`mig-num-${safeId}`)?.value || '1';
+  const shelf = document.getElementById(`mig-shelf-${safeId}`)?.value || '1';
+  const el    = document.getElementById(`mig-preview-${safeId}`);
+  if (el) el.textContent = formatLocation(type, num, shelf);
+};
+
+window.saveMigratedLocations = async function() {
+  const rows = document.querySelectorAll('.mig-row');
+  const updates = [];
+  rows.forEach(row => {
+    const tankId  = row.dataset.tankId;
+    const safeId  = row.id.replace('mig-row-', '');
+    const type    = document.querySelector(`input[name="mig-type-${safeId}"]:checked`)?.value || 'R';
+    const num     = document.getElementById(`mig-num-${safeId}`)?.value || '1';
+    const shelf   = document.getElementById(`mig-shelf-${safeId}`)?.value || '1';
+    const loc     = formatLocation(type, num, shelf);
+    const fish    = fishData.find(f => (f.tankId || f.id) === tankId);
+    if (fish) { fish.location = loc; updates.push({ fish, rowIndex: fish._rowIndex }); }
+  });
+  if (!demoMode) {
+    showToast('💾 Saving locations…');
+    await Promise.all(updates.map(({ fish, rowIndex }) => updateSheetRow(fish, rowIndex)));
+  }
+  localStorage.setItem('fzfish-loc-migrated', 'true');
+  document.getElementById('loc-migrate-overlay').classList.remove('active');
+  checkScrollLock();
+  renderAll();
+  showToast('✅ Locations updated');
+};
+
+window.skipMigration = function() {
+  document.getElementById('loc-migrate-overlay').classList.remove('active');
+  checkScrollLock();
+};
+
+// ── Unsorted markers migration wizard ─────────────────────────────────────────
+let migUnsortedState = {}; // { safeId: string[] }
+
+// A value "looks like genotype notation" if it contains ; or / (e.g. +;-, +/-)
+// or is entirely made of +, -, ? symbols.  Real marker names look like EGFP, fli1, etc.
+function looksLikeGenotype(markers) {
+  return markers.some(m => /[;\/]/.test(m) || /[+\-?±]/.test(m) || /unsort/i.test(m));
+}
+
+function checkUnsortedMigration() {
+  if (demoMode) return;
+  // No localStorage flag — re-run every login until all values look like real marker names
+  const needsMigration = fishData.filter(f => f.unsorted?.length && looksLikeGenotype(f.unsorted));
+  if (!needsMigration.length) return;
+  openUnsortedMigrate(needsMigration);
+}
+
+function openUnsortedMigrate(tanks) {
+  migUnsortedState = {};
+  const list = document.getElementById('unsorted-migrate-list');
+  if (!list) return;
+  list.innerHTML = tanks.map(f => {
+    const id = f.tankId || f.id;
+    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const originalVal = (f.unsorted || []).join(', ');
+    migUnsortedState[safeId] = [...(f.unsorted || [])];
+    return `
+    <div class="mig-u-row" id="mig-u-row-${safeId}" data-tank-id="${esc(id)}">
+      <div class="mig-u-header">
+        <span class="mig-u-tankid">${esc(id)}</span>
+        <span class="mig-u-line">${esc(f.line || '')}</span>
+      </div>
+      <div class="mig-u-was">Previous genotype value: <em>${esc(originalVal)}</em></div>
+      <div class="mig-u-tags" id="mig-u-tags-${safeId}"></div>
+      <div class="mig-u-input-row">
+        <input id="mig-u-input-${safeId}" class="mig-u-input" type="text"
+          placeholder="Type marker name…" autocapitalize="none" autocorrect="off" spellcheck="false"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();addMigUnsortedMarker('${safeId}')}" />
+        <button type="button" class="btn-tag-add" onclick="addMigUnsortedMarker('${safeId}')">＋</button>
+      </div>
+    </div>`;
+  }).join('');
+  tanks.forEach(f => {
+    const id = f.tankId || f.id;
+    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    renderMigUnsortedTags(safeId);
+  });
+  document.getElementById('unsorted-migrate-overlay').classList.add('active');
+  checkScrollLock();
+}
+
+function renderMigUnsortedTags(safeId) {
+  const container = document.getElementById(`mig-u-tags-${safeId}`);
+  if (!container) return;
+  const markers = migUnsortedState[safeId] || [];
+  container.innerHTML = markers.map((m, i) =>
+    `<span class="marker-tag marker-tag-unsorted">${esc(m)}<button type="button" onclick="removeMigUnsortedMarker('${safeId}',${i})">×</button></span>`
+  ).join('');
+}
+
+window.addMigUnsortedMarker = function(safeId) {
+  const input = document.getElementById(`mig-u-input-${safeId}`);
+  if (!input) return;
+  const v = input.value.trim();
+  if (!v) return;
+  input.value = '';
+  if (!migUnsortedState[safeId]) migUnsortedState[safeId] = [];
+  if (!migUnsortedState[safeId].find(m => m.toLowerCase() === v.toLowerCase())) {
+    migUnsortedState[safeId].push(v);
+  }
+  renderMigUnsortedTags(safeId);
+};
+
+window.removeMigUnsortedMarker = function(safeId, i) {
+  if (migUnsortedState[safeId]) migUnsortedState[safeId].splice(i, 1);
+  renderMigUnsortedTags(safeId);
+};
+
+window.saveUnsortedMigration = async function() {
+  const rows = document.querySelectorAll('.mig-u-row');
+  const updates = [];
+  rows.forEach(row => {
+    const tankId = row.dataset.tankId;
+    const safeId = row.id.replace('mig-u-row-', '');
+    const fish   = fishData.find(f => (f.tankId || f.id) === tankId);
+    if (fish) {
+      fish.unsorted = migUnsortedState[safeId] || [];
+      updates.push({ fish, rowIndex: fish._rowIndex });
+    }
+  });
+  if (!demoMode) {
+    showToast('💾 Saving…');
+    await Promise.all(updates.map(({ fish, rowIndex }) => updateSheetRow(fish, rowIndex)));
+  }
+  document.getElementById('unsorted-migrate-overlay').classList.remove('active');
+  checkScrollLock();
+  renderAll();
+  showToast('✅ Unsorted markers updated');
+};
+
+window.skipUnsortedMigration = function() {
+  document.getElementById('unsorted-migrate-overlay').classList.remove('active');
+  checkScrollLock();
+};
+
+// ── Recent lines quick-fill ───────────────────────────────────────────────────
+function getRecentLines() {
+  try { return JSON.parse(localStorage.getItem('fzfish-recent-lines') || '[]'); } catch { return []; }
+}
+function addRecentLine(line) {
+  if (!line) return;
+  const lines = getRecentLines().filter(l => l !== line);
+  lines.unshift(line);
+  localStorage.setItem('fzfish-recent-lines', JSON.stringify(lines.slice(0, 3)));
+}
+function renderRecentLines() {
+  const el = document.getElementById('recent-lines');
+  if (!el) return;
+  const lines = getRecentLines();
+  if (!lines.length) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = lines.map(l =>
+    `<button type="button" class="recent-line-pill" onclick="document.getElementById('f-line').value='${esc(l)}'">${esc(l)}</button>`
+  ).join('');
+}
+
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
 window.openAddModal = function() {
-  editingId = null; currentMarkers = []; currentNegMarkers = [];
+  editingId = null; currentMarkers = []; currentNegMarkers = []; currentUnsortedMarkers = [];
   currentPhotoUrl = null; originalPhotoUrl = null; pendingPhotoFile = null;
   currentThumbPos = '50% 15%';
   document.getElementById('modal-title').textContent = 'Add Tank';
@@ -1267,8 +1995,11 @@ window.openAddModal = function() {
   document.getElementById('f-tank-id').value             = '';
   document.getElementById('markers-container').innerHTML     = '';
   document.getElementById('neg-markers-container').innerHTML = '';
+  document.getElementById('unsorted-markers-container').innerHTML = '';
   document.querySelector('input[name="status"][value="Active"]').checked = true;
+  setLocInForm('');
   resetPhotoUI();
+  renderRecentLines();
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -1277,21 +2008,50 @@ window.openEditModal = function(id) {
   const f = fishData.find(x => x.id === id);
   if (!f) return;
   editingId = id; currentMarkers = [...(f.markers || [])]; currentNegMarkers = [...(f.negMarkers || [])];
+  currentUnsortedMarkers = [...(f.unsorted || [])];
   currentPhotoUrl = f.photoUrl || null; originalPhotoUrl = f.photoUrl || null; pendingPhotoFile = null;
   currentThumbPos = f.thumbPos || '50% 15%';
   document.getElementById('modal-title').textContent = 'Edit Tank';
   document.getElementById('f-tank-id').value  = f.tankId || f.id || '';
   document.getElementById('f-line').value     = f.line;
-  document.getElementById('f-genotype').value = f.genotype || '';
   document.getElementById('f-age').value      = f.age || '';
   document.getElementById('f-count').value    = f.count || '';
-  document.getElementById('f-location').value = f.location || '';
+  setLocInForm(f.location || '');
   document.getElementById('f-notes').value    = f.notes || '';
   const si = document.querySelector(`input[name="status"][value="${f.status}"]`);
   if (si) si.checked = true;
-  renderMarkerTags(); renderNegMarkerTags();
+  renderMarkerTags(); renderNegMarkerTags(); renderUnsortedMarkerTags();
   resetPhotoUI();
   if (currentPhotoUrl) showPhotoPreview(currentPhotoUrl);
+  renderRecentLines();
+  document.getElementById('fish-modal').classList.add('active');
+  checkScrollLock();
+};
+
+window.duplicateFish = function(id) {
+  const f = fishData.find(x => x.id === id);
+  if (!f) return;
+  // Open the add form pre-filled with this tank's data, minus photo, tankId, and notes
+  editingId = null;
+  currentMarkers        = [...(f.markers     || [])];
+  currentNegMarkers     = [...(f.negMarkers  || [])];
+  currentUnsortedMarkers = [...(f.unsorted   || [])];
+  currentPhotoUrl       = null;
+  originalPhotoUrl      = null;
+  pendingPhotoFile      = null;
+  currentThumbPos       = '50% 15%';
+  document.getElementById('modal-title').textContent = 'Duplicate Tank';
+  document.getElementById('f-tank-id').value = '';
+  document.getElementById('f-line').value    = f.line || '';
+  document.getElementById('f-age').value     = f.age  || '';
+  document.getElementById('f-count').value   = f.count || '';
+  setLocInForm(f.location || '');
+  document.getElementById('f-notes').value   = '';
+  const si = document.querySelector(`input[name="status"][value="${f.status}"]`);
+  if (si) si.checked = true;
+  renderMarkerTags(); renderNegMarkerTags(); renderUnsortedMarkerTags();
+  resetPhotoUI();
+  renderRecentLines();
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -1300,6 +2060,7 @@ window.closeModal = function() {
   document.getElementById('fish-modal').classList.remove('active');
   document.getElementById('pos-picker-dropdown')?.classList.add('hidden');
   document.getElementById('neg-picker-dropdown')?.classList.add('hidden');
+  document.getElementById('unsorted-picker-dropdown')?.classList.add('hidden');
   checkScrollLock();
 };
 
@@ -1382,10 +2143,10 @@ window.saveFish = async function(e) {
   const record = {
     tankId:     document.getElementById('f-tank-id').value.trim() || (editingId ? (fishData.find(x => x.id === editingId)?.tankId || editingId) : `tank-${Date.now()}`),
     line:       document.getElementById('f-line').value.trim(),
-    genotype:   document.getElementById('f-genotype').value.trim(),
+    unsorted:   [...currentUnsortedMarkers],
     age:        document.getElementById('f-age').value.trim(),
     count:      parseInt(document.getElementById('f-count').value) || 0,
-    location:   document.getElementById('f-location').value.trim(),
+    location:   getLocFromForm(),
     markers:    [...currentMarkers],
     negMarkers: [...currentNegMarkers],
     status:     document.querySelector('input[name="status"]:checked').value,
@@ -1394,6 +2155,7 @@ window.saveFish = async function(e) {
     updated: new Date().toISOString().slice(0, 16).replace('T', ' '),
   };
   record.id = record.tankId;
+  addRecentLine(record.line);
 
   if (editingId) {
     const idx = fishData.findIndex(x => x.id === editingId);
@@ -1446,6 +2208,12 @@ function renderNegMarkerTags() {
 }
 window.removeNegMarker = function(i) { currentNegMarkers.splice(i, 1); renderNegMarkerTags(); refreshNegPicker(); };
 
+function renderUnsortedMarkerTags() {
+  document.getElementById('unsorted-markers-container').innerHTML = currentUnsortedMarkers.map((m, i) =>
+    `<span class="marker-tag marker-tag-unsorted">${esc(m)}<button type="button" onclick="removeUnsortedMarker(${i})">×</button></span>`).join('');
+}
+window.removeUnsortedMarker = function(i) { currentUnsortedMarkers.splice(i, 1); renderUnsortedMarkerTags(); refreshUnsortedPicker(); };
+
 // ── Marker picker dropdowns (in Add/Edit modal) ───────────────────────────────
 function buildPickerHtml(allMarkers, currentList, toggleFn, newInputId) {
   let html = '';
@@ -1495,11 +2263,21 @@ function refreshNegPicker() {
   if (ni) ni.value = prev;
 }
 
+function refreshUnsortedPicker() {
+  const dd = document.getElementById('unsorted-picker-dropdown');
+  if (!dd || dd.classList.contains('hidden')) return;
+  const prev = document.getElementById('unsorted-new-input')?.value || '';
+  dd.innerHTML = buildPickerHtml(uniqueUnsortedMarkers(), currentUnsortedMarkers, 'toggleUnsortedMarkerInPicker', 'unsorted-new-input');
+  const ni = document.getElementById('unsorted-new-input');
+  if (ni) ni.value = prev;
+}
+
 window.togglePosPicker = function() {
   const dd = document.getElementById('pos-picker-dropdown');
   const opening = dd.classList.contains('hidden');
   document.getElementById('pos-picker-dropdown').classList.add('hidden');
   document.getElementById('neg-picker-dropdown').classList.add('hidden');
+  document.getElementById('unsorted-picker-dropdown')?.classList.add('hidden');
   if (opening) {
     dd.innerHTML = buildPickerHtml(uniquePosMarkers(), currentMarkers, 'toggleMarkerInPicker', 'pos-new-input');
     dd.classList.remove('hidden');
@@ -1512,8 +2290,23 @@ window.toggleNegPicker = function() {
   const opening = dd.classList.contains('hidden');
   document.getElementById('pos-picker-dropdown').classList.add('hidden');
   document.getElementById('neg-picker-dropdown').classList.add('hidden');
+  document.getElementById('unsorted-picker-dropdown')?.classList.add('hidden');
   if (opening) {
     dd.innerHTML = buildPickerHtml(uniqueNegMarkers(), currentNegMarkers, 'toggleNegMarkerInPicker', 'neg-new-input');
+    dd.classList.remove('hidden');
+    dd.scrollTop = 0;
+  }
+};
+
+window.toggleUnsortedPicker = function() {
+  const dd = document.getElementById('unsorted-picker-dropdown');
+  if (!dd) return;
+  const opening = dd.classList.contains('hidden');
+  document.getElementById('pos-picker-dropdown')?.classList.add('hidden');
+  document.getElementById('neg-picker-dropdown')?.classList.add('hidden');
+  document.getElementById('unsorted-picker-dropdown').classList.add('hidden');
+  if (opening) {
+    dd.innerHTML = buildPickerHtml(uniqueUnsortedMarkers(), currentUnsortedMarkers, 'toggleUnsortedMarkerInPicker', 'unsorted-new-input');
     dd.classList.remove('hidden');
     dd.scrollTop = 0;
   }
@@ -1531,6 +2324,12 @@ window.toggleNegMarkerInPicker = function(m, checked) {
   renderNegMarkerTags(); refreshNegPicker();
 };
 
+window.toggleUnsortedMarkerInPicker = function(m, checked) {
+  if (checked && !currentUnsortedMarkers.includes(m)) currentUnsortedMarkers.push(m);
+  else if (!checked) currentUnsortedMarkers = currentUnsortedMarkers.filter(x => x !== m);
+  renderUnsortedMarkerTags(); refreshUnsortedPicker();
+};
+
 window.addNewMarker = function(inputId) {
   const input = document.getElementById(inputId);
   if (!input) return;
@@ -1543,6 +2342,13 @@ window.addNewMarker = function(inputId) {
       currentMarkers.push(marker); renderMarkerTags();
     }
     refreshPosPicker();
+  } else if (inputId === 'unsorted-new-input') {
+    const existing = uniqueUnsortedMarkers().find(m => m.toLowerCase() === v.toLowerCase());
+    const marker = existing || v;
+    if (!currentUnsortedMarkers.find(m => m.toLowerCase() === v.toLowerCase())) {
+      currentUnsortedMarkers.push(marker); renderUnsortedMarkerTags();
+    }
+    refreshUnsortedPicker();
   } else {
     const existing = uniqueNegMarkers().find(m => m.toLowerCase() === v.toLowerCase());
     const marker = existing || v;
@@ -1564,7 +2370,7 @@ document.addEventListener('keydown', e => {
 
 // Close picker dropdowns on outside click
 document.addEventListener('click', e => {
-  ['pos-picker-wrap', 'neg-picker-wrap'].forEach(id => {
+  ['pos-picker-wrap', 'neg-picker-wrap', 'unsorted-picker-wrap'].forEach(id => {
     const wrap = document.getElementById(id);
     if (wrap && !wrap.contains(e.target)) {
       wrap.querySelector('.marker-picker-dropdown')?.classList.add('hidden');
@@ -1574,7 +2380,7 @@ document.addEventListener('click', e => {
 
 // ── Delete ────────────────────────────────────────────────────────────────────
 window.deleteFish = async function(id) {
-  if (!confirm('Delete this tank record?')) return;
+  if (!confirm('Delete this tank from inventory? This can\'t be undone.')) return;
   const fish = fishData.find(f => f.id === id);
   if (!fish) return;
   if (!demoMode && fish._rowIndex) {
@@ -1599,8 +2405,14 @@ window.deleteFish = async function(id) {
   // Remove deleted tank from any experiments
   const deletedId = fish.tankId;
   if (deletedId) {
-    experiments.forEach(exp => { exp.tankIds = exp.tankIds.filter(id => id !== deletedId); });
-    if (currentExperiment) currentExperiment.tankIds = currentExperiment.tankIds.filter(id => id !== deletedId);
+    experiments.forEach(exp => {
+      exp.tankIds = exp.tankIds.filter(id => id !== deletedId);
+      if (exp.tankGroups) delete exp.tankGroups[deletedId];
+    });
+    if (currentExperiment) {
+      currentExperiment.tankIds = currentExperiment.tankIds.filter(id => id !== deletedId);
+      if (currentExperiment.tankGroups) delete currentExperiment.tankGroups[deletedId];
+    }
   }
   showToast('🗑 Tank deleted');
   closeDrawer(); renderAll();
@@ -1612,13 +2424,15 @@ window.toggleTankInExperiment = async function(tankId, expIdx) {
   if (!exp) return;
   const inExp = exp.tankIds.includes(tankId);
   if (inExp) {
+    if (!confirm(`Remove this tank from "${exp.name}"? This can't be undone.`)) return;
     exp.tankIds = exp.tankIds.filter(id => id !== tankId);
-    if (currentExperiment?.gid === exp.gid) currentExperiment.tankIds = exp.tankIds;
+    if (exp.tankGroups) delete exp.tankGroups[tankId];
+    if (currentExperiment?.gid === exp.gid) { currentExperiment.tankIds = exp.tankIds; currentExperiment.tankGroups = exp.tankGroups; }
   } else {
     exp.tankIds = [...exp.tankIds, tankId];
     if (currentExperiment?.gid === exp.gid) currentExperiment.tankIds = exp.tankIds;
   }
-  if (!demoMode) saveExpTankIds(exp.name, exp.tankIds);
+  if (!demoMode) saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
   // Re-render just the exp section inside the drawer
   const el = document.getElementById(`exp-membership-${expIdx}`);
   if (el) el.classList.toggle('exp-member-active', exp.tankIds.includes(tankId));
@@ -1630,8 +2444,9 @@ window.toggleTankInExperiment = async function(tankId, expIdx) {
 window.openDrawer = function(id) {
   const f = fishData.find(x => x.id === id);
   if (!f) return;
-  const posHtml = (f.markers    || []).length ? (f.markers   || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join(' ')           : '<span style="color:var(--text-dim)">None</span>';
-  const negHtml = (f.negMarkers || []).length ? (f.negMarkers|| []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join(' ') : '<span style="color:var(--text-dim)">None</span>';
+  const posHtml      = (f.markers    || []).length ? (f.markers   || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join(' ')                  : '<span style="color:var(--text-dim)">None</span>';
+  const negHtml      = (f.negMarkers || []).length ? (f.negMarkers|| []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join(' ')        : '<span style="color:var(--text-dim)">None</span>';
+  const unsortedHtml = (f.unsorted   || []).length ? (f.unsorted  || []).map(m => `<span class="m-tag m-tag-unsorted">${esc(m)}</span>`).join(' ')     : '<span style="color:var(--text-muted);font-size:.85rem">—</span>';
   const photoHtml = f.photoUrl ? `<img class="drawer-photo" src="${esc(f.photoUrl)}" onclick="openLightbox('${esc(f.photoUrl)}')" title="Click to enlarge" />` : '';
 
   document.getElementById('drawer-content').innerHTML = `
@@ -1640,8 +2455,7 @@ window.openDrawer = function(id) {
     <span class="status-badge badge-${f.status}" style="margin-top:.25rem;display:inline-block">${esc(f.status)}</span>
     <div class="drawer-section">
       <h4>Details</h4>
-      <div class="drawer-row"><span class="drawer-row-label">Genotype</span><span class="drawer-row-val">${esc(f.genotype || '—')}</span></div>
-      <div class="drawer-row"><span class="drawer-row-label">Fert. Date</span><span class="drawer-row-val">${formatDate(f.age)}</span></div>
+      <div class="drawer-row"><span class="drawer-row-label">Fert. Date</span><span class="drawer-row-val">${formatDate(f.age)}${f.age ? ' · ' + calcDpf(f.age) + ' dpf' : ''}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Count</span><span class="drawer-row-val">${f.count || '—'}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Location</span><span class="drawer-row-val">${esc(f.location || '—')}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Last Updated</span><span class="drawer-row-val">${formatDateTime(f.updated)}</span></div>
@@ -1653,6 +2467,10 @@ window.openDrawer = function(id) {
     <div class="drawer-section">
       <h4>Negative Markers</h4>
       <div style="display:flex;flex-wrap:wrap;gap:.35rem;padding:.5rem 0">${negHtml}</div>
+    </div>
+    <div class="drawer-section">
+      <h4>Unsorted Markers (?)</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:.35rem;padding:.5rem 0">${unsortedHtml}</div>
     </div>
     ${f.notes ? `<div class="drawer-section"><h4>Notes</h4><p style="font-size:.88rem;color:var(--text-muted);line-height:1.5">${esc(f.notes)}</p></div>` : ''}
     ${experiments.length ? `
@@ -1671,7 +2489,10 @@ window.openDrawer = function(id) {
     </div>` : ''}
     <div class="drawer-actions">
       <button class="btn-primary" onclick="closeDrawer();openEditModal('${esc(f.id)}')">Edit</button>
-      <button class="btn-ghost"   onclick="closeDrawer();deleteFish('${esc(f.id)}')">Delete</button>
+      <button class="btn-ghost" onclick="closeDrawer();duplicateFish('${esc(f.id)}')">Duplicate</button>
+      ${currentExperiment
+        ? `<button class="btn-ghost" onclick="closeDrawer();removeFromExperiment('${esc(f.tankId)}',event)">Remove from Experiment</button>`
+        : `<button class="btn-ghost" onclick="closeDrawer();deleteFish('${esc(f.id)}')">Delete from Inventory</button>`}
     </div>
   `;
   document.getElementById('detail-drawer').classList.add('open');

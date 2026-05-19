@@ -62,17 +62,14 @@
         <div class="form-group full-width">
           <label>Tank ID</label>
           <div class="input-with-btn">
-            <input id="f-tank-id" type="text" placeholder="Auto-generated if left blank" />
+            <input id="f-tank-id" type="text" placeholder="Should be Cxxxx if scanned" />
             <button type="button" class="btn-scan-inline" onclick="openScannerForForm()" title="Scan barcode">📷</button>
           </div>
         </div>
         <div class="form-group">
           <label>Line Name *</label>
           <input id="f-line" type="text" required placeholder="e.g. MCYN:eGFP;CD4:mCherry)" />
-        </div>
-        <div class="form-group">
-          <label>Genotype</label>
-          <input id="f-genotype" type="text" placeholder="e.g. +;-/?;+" />
+          <div id="recent-lines" class="recent-lines-wrap" style="display:none"></div>
         </div>
         <div class="form-group">
           <label>Date of Fertilization</label>
@@ -84,7 +81,26 @@
         </div>
         <div class="form-group full-width">
           <label>Rack / Location</label>
-          <input id="f-location" type="text" placeholder="e.g. R1 S2" />
+          <div class="loc-picker">
+            <div class="loc-type-row">
+              <label class="loc-type-opt rack-opt"><input type="radio" name="loc-type" value="R" checked onchange="updateLocPicker()"> Rack</label>
+              <label class="loc-type-opt nursery-opt"><input type="radio" name="loc-type" value="N" onchange="updateLocPicker()"> Nursery</label>
+              <label class="loc-type-opt incubator-opt"><input type="radio" name="loc-type" value="I" onchange="updateLocPicker()"> Incubator</label>
+            </div>
+            <div class="loc-selects-row" id="loc-selects-row">
+              <div class="loc-select-group">
+                <span class="loc-select-label">#</span>
+                <input id="loc-num" class="loc-select loc-num-input" type="text" maxlength="1"
+                  inputmode="numeric" placeholder="1" value="1" oninput="updateLocPreview()" />
+              </div>
+              <div class="loc-select-group">
+                <span class="loc-select-label">Shelf</span>
+                <input id="loc-shelf" class="loc-select loc-num-input" type="text" maxlength="1"
+                  inputmode="numeric" placeholder="1" value="1" oninput="updateLocPreview()" />
+              </div>
+              <span class="loc-preview" id="loc-preview"></span>
+            </div>
+          </div>
         </div>
         <div class="form-group full-width">
           <label>Positive Markers (+)</label>
@@ -106,6 +122,18 @@
               − Add Marker ▾
             </button>
             <div id="neg-picker-dropdown" class="marker-picker-dropdown hidden"></div>
+          </div>
+        </div>
+        <div class="form-group full-width">
+          <label>Unsorted Markers (?)</label>
+          <p class="field-note">Transgenes not yet confirmed present or absent.</p>
+          <div id="unsorted-markers-container" class="tag-input-area"></div>
+          <datalist id="unsorted-markers-datalist"></datalist>
+          <div class="marker-picker-wrap" id="unsorted-picker-wrap">
+            <button type="button" class="marker-picker-btn marker-picker-btn-unsorted" onclick="toggleUnsortedPicker()">
+              ? Add Marker ▾
+            </button>
+            <div id="unsorted-picker-dropdown" class="marker-picker-dropdown hidden"></div>
           </div>
         </div>
         <div class="form-group full-width">
@@ -211,7 +239,15 @@
       <button class="exp-bar-rename-btn" onclick="startRenameExp()" title="Rename">✏️</button>
     </div>
     <div class="exp-bar-right">
-      <button class="btn-exp-action" onclick="openTankPicker()">+ Add Tanks</button>
+      <button class="btn-exp-action" onclick="enterSelectionModeForExperiment()">＋ Add Tanks</button>
+      <button id="group-color-btn" class="btn-exp-action" onclick="toggleGroupByColor()" title="Group cards by color">⬤ Group</button>
+      <div class="exp-group-btns" title="Assign group color to selected tanks">
+        <button class="exp-group-swatch swatch-green"  onclick="enterSelectionModeForGroup('green')"  title="Green group">●</button>
+        <button class="exp-group-swatch swatch-red"    onclick="enterSelectionModeForGroup('red')"    title="Red group">●</button>
+        <button class="exp-group-swatch swatch-blue"   onclick="enterSelectionModeForGroup('blue')"   title="Blue group">●</button>
+        <button class="exp-group-swatch swatch-yellow" onclick="enterSelectionModeForGroup('yellow')" title="Yellow group">●</button>
+        <button class="exp-group-swatch swatch-none"   onclick="enterSelectionModeForGroup('none')"   title="Clear group">○</button>
+      </div>
       <button class="btn-exp-action danger" onclick="deleteExperiment()">Delete</button>
       <button class="btn-exp-close" onclick="exitExperiment()">✕ Exit</button>
     </div>
@@ -244,34 +280,6 @@
   <!-- Filter panel (stats + chips — desktop always visible, hidden on mobile) -->
   <div class="filter-panel" id="filter-panel">
 
-    <!-- Stats bar -->
-    <div class="stats-bar">
-      <div class="stat-chip" onclick="clearFilters()">
-        <span class="stat-num" id="stat-total">0</span>
-        <span class="stat-label">Total</span>
-      </div>
-      <div class="stat-chip" onclick="setFilter('Active')">
-        <span class="stat-num active-color" id="stat-active">0</span>
-        <span class="stat-label">Active</span>
-      </div>
-      <div class="stat-chip" onclick="setFilter('Nursery')">
-        <span class="stat-num nursery-color" id="stat-nursery">0</span>
-        <span class="stat-label">Nursery</span>
-      </div>
-      <div class="stat-chip" onclick="setFilter('Incubator')">
-        <span class="stat-num incubator-color" id="stat-incubator">0</span>
-        <span class="stat-label">Incubator</span>
-      </div>
-      <div class="stat-chip" onclick="setFilter('Low Stock')">
-        <span class="stat-num low-color" id="stat-low">0</span>
-        <span class="stat-label">Low Stock</span>
-      </div>
-      <div class="stat-chip" onclick="setFilter('Archived')">
-        <span class="stat-num" id="stat-archived">0</span>
-        <span class="stat-label">Archived</span>
-      </div>
-    </div>
-
     <!-- Filter + sort bar -->
     <div class="filter-bar">
       <div class="filter-chips" id="filter-chips">
@@ -297,18 +305,52 @@
           </button>
           <div id="neg-dropdown" class="marker-dropdown hidden"></div>
         </div>
+        <!-- Unsorted marker filter -->
+        <div class="marker-filter-wrap" id="unsorted-filter-wrap">
+          <button class="marker-filter-btn unsorted-filter-btn" id="unsorted-filter-btn" onclick="toggleUnsortedDropdown()">
+            ?Markers<span id="unsorted-filter-count"></span> ▾
+          </button>
+          <div id="unsorted-dropdown" class="marker-dropdown hidden"></div>
+        </div>
+        <!-- DPF range filter -->
+        <div class="dpf-filter-wrap">
+          <input id="dpf-min" class="dpf-input" type="number" min="0" placeholder="dpf ≥" title="Min dpf" oninput="applyDpfFilter()" />
+          <span class="dpf-sep">–</span>
+          <input id="dpf-max" class="dpf-input" type="number" min="0" placeholder="dpf ≤" title="Max dpf" oninput="applyDpfFilter()" />
+        </div>
         <button id="reset-filters-btn" class="reset-filters-btn hidden" onclick="clearFilters()" title="Clear all filters">✕ Reset</button>
+        <button id="img-toggle-btn" class="sort-dir-btn" onclick="toggleImgMode()" title="Toggle photos">🖼</button>
+        <button id="sel-mode-btn" class="sort-dir-btn" onclick="enterSelectionModeAuto()" title="Select tanks">☑</button>
         <select id="sort-select" onchange="sortFish()" class="sort-select">
           <option value="line">Line</option>
-          <option value="age">Fert. Date</option>
+          <option value="age" selected>Fert. Date</option>
           <option value="count">Count</option>
           <option value="updated">Last Updated</option>
         </select>
-        <button class="sort-dir-btn" id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle sort direction">↑</button>
+        <button class="sort-dir-btn" id="sort-dir-btn" onclick="toggleSortDir()" title="Toggle sort direction">↓</button>
       </div>
     </div>
 
   </div><!-- /filter-panel -->
+
+  <!-- Selection bar (sticky bottom, shown in selection mode) -->
+  <div id="selection-bar" class="selection-bar hidden">
+    <span id="sel-count-label" class="sel-count">0 selected</span>
+    <div class="sel-actions">
+      <!-- experiment-add context: confirm adds tanks -->
+      <button id="sel-confirm-btn" class="sel-btn btn-primary hidden" onclick="confirmSelectionAction()">Add to Experiment</button>
+      <!-- experiment-remove context: confirm removes tanks from experiment -->
+      <button id="sel-remove-btn" class="sel-btn sel-delete-btn hidden" onclick="confirmSelectionAction()">✕ Remove from Exp</button>
+      <!-- general context: add to experiment dropdown -->
+      <div id="sel-add-exp-wrap" class="sel-add-exp-wrap hidden">
+        <button class="sel-btn btn-primary" onclick="toggleAddToExpDropdown(event)">＋ Experiment ▾</button>
+        <div id="sel-add-exp-dd" class="sel-add-exp-dd hidden"></div>
+      </div>
+      <!-- general context: delete -->
+      <button id="sel-delete-btn" class="sel-btn sel-delete-btn hidden" onclick="deleteSelected()">🗑 Delete</button>
+      <button class="sel-btn btn-ghost" onclick="exitSelectionMode()">Cancel</button>
+    </div>
+  </div>
 
   <!-- Fish grid -->
   <main class="fish-grid" id="fish-grid">
@@ -391,27 +433,38 @@
         ⚠️ <strong>Please do not edit the Google Sheet directly.</strong> All changes should be made through this app — editing the sheet manually can break the inventory for everyone.
       </div>
 
+      <div class="guide-links-bar">
+        📊 <a href="https://docs.google.com/spreadsheets/d/1AviXu1_KPFRx158Af05qBmA-LCw2GhxJxvfZEFUCuqY" target="_blank">Google Sheet</a>
+        &nbsp;·&nbsp;
+        📁 <a href="https://drive.google.com/drive/folders/1VTpNTlB-JMLPZNKzgm0IIXCRkk9Agzf7" target="_blank">Drive Folder</a>
+        &nbsp;·&nbsp;
+        💻 <a href="https://github.com/marjvilla/FZFish" target="_blank">GitHub</a>
+      </div>
+
       <div class="guide-section">
         <h3>🔐 Signing In</h3>
-        <p>Click <strong>Sign in with Google</strong> using your <strong>@bu.edu</strong> Google account that has access to the shared inventory google drive. Hit allow for the first prompt about email sharing (<em>Used for changelog tracking</em>), and hit allow all both Google Drive and Google Sheets Editing (<em>Used for editing the google sheet backend, and also adding photos to each tank</em>). Your session stays active until you sign out. Use <strong>Test Mode</strong> to explore without saving anything.</p>
+        <p>Click <strong>Sign in with Google</strong> using your <strong>@bu.edu</strong> Google account that has access to the shared inventory Google Drive. Hit allow for the email-sharing prompt (<em>used for changelog tracking</em>) and allow both Google Drive and Google Sheets permissions (<em>used to edit the sheet and upload tank photos</em>). Your session stays active until you sign out. Use <strong>Test Mode</strong> to explore without saving anything.</p>
       </div>
 
       <div class="guide-section">
         <h3>➕ Adding a Tank</h3>
         <p>Click <strong>+ Add Tank</strong> (desktop) or the <strong>+</strong> button (bottom-right on mobile). You may also scan a new barcode to begin adding.</p>
         <ul>
-          <li>Attempt to scan the barcode with 📷 (<em>The barcode text is in the bottom left of the label!</em>). If the fish is in the incubator it will auto-generate a Tank ID. However <strong>please put barcodes on as soon as possible</strong> — you will thank yourself later!</li>
-          <li>Fill in the line name using <strong>A:b;C:D x Z</strong> formatting (<em>Ex. dbh:eGFP;CD4:mCherry x CD8:eGFP</em>).</li>
-          <li>Add the genotype using <strong>+;-/?</strong> formatting (<em>In the example above: dbh+, CD4−, CD8 questionable</em>).</li>
-          <li>Input locations using <strong>Rx Sy or Nx Sy</strong> where R/N are the rack or nursery locations and S is the shelf, going up in value from the ground.</li>
-          <li>Put any important notes in the notes section, including uncertain genes.</li>
+          <li>Attempt to scan the barcode with 📷 (<em>The barcode text is in the bottom left of the label!</em>). Fish in the incubator will auto-generate a Tank ID — <strong>please put barcodes on as soon as possible</strong>.</li>
+          <li>Fill in the line name using <strong>A:b;C:D x Z</strong> formatting (<em>e.g. dbh:eGFP;CD4:mCherry x CD8:eGFP</em>).</li>
+          <li>Input locations using <strong>Rx Sy</strong> or <strong>Nx Sy</strong> where R/N = rack or nursery, S = shelf counting up from the ground.</li>
+          <li>Add any important notes in the notes section.</li>
         </ul>
       </div>
 
       <div class="guide-section">
         <h3>🧬 Markers</h3>
-        <p>Positive markers (green tags) are transgenes <strong>confirmed present</strong>. Negative markers (red tags) are transgenes <strong>confirmed absent</strong>. Add them using the dropdown pickers when editing a tank. Once added to any tank they appear as filter options across the app.</p>
-        <p>For uncertain genes, put them in the notes as <strong>Gene?</strong> — they will be indexed by search and show up.</p>
+        <p>Add markers using the dropdown pickers when editing a tank. Once added to any tank, a marker appears as a filter option across the app.</p>
+        <ul>
+          <li><strong>Positive markers</strong> (green tags) — transgenes <strong>confirmed present</strong></li>
+          <li><strong>Negative markers</strong> (red tags) — transgenes <strong>confirmed absent</strong></li>
+          <li><strong>Unsorted markers</strong> (gray tags) — transgenes <strong>not yet confirmed</strong> as present or absent; use these for fish whose genotype is still pending</li>
+        </ul>
       </div>
 
       <div class="guide-section">
@@ -429,34 +482,52 @@
 
       <div class="guide-section">
         <h3>🏞️ Pictures</h3>
-        <p>Please add photos to each tank at each stage — this <strong>includes embryo plates</strong> — to make inventory easier for anyone working on your project. Photos are automatically saved to the shared Google Drive folder if you ever need the original. Be sure to <strong>adjust the tape to be in frame</strong> using the dot under the uploaded photo</p>
+        <p>Please add photos at each stage — this <strong>includes embryo plates</strong> — to make the inventory useful for anyone working on your project. Photos are automatically saved to the shared Google Drive folder. Use the dot under the uploaded photo to <strong>adjust the thumbnail crop</strong> so the info tape is in frame.</p>
       </div>
 
       <div class="guide-section">
         <h3>📷 Barcode Scanning</h3>
-        <p>Tap the 📷 icon in the header to scan a tank barcode. The app will jump straight to that tank, or start a new tank entry. You can also scan while adding or editing a tank to fill in the Tank ID field automatically.</p>
+        <p>Tap the 📷 icon in the header to scan a tank barcode. The app will jump straight to that tank or start a new tank entry. You can also scan while adding or editing a tank to fill in the Tank ID field automatically.</p>
       </div>
 
       <div class="guide-section">
-        <h3>✏️ Editing, Moving Tanks &amp; Deleting</h3>
-        <p>Click any tank card to open the detail panel. From there you can <strong>Edit</strong> all fields or <strong>Delete</strong> the tank. Changes sync to the shared Google Sheet immediately. <strong>If you are moving a tank, be sure to update its status and location in the inventory.</strong> All changes are saved to a changelog tab on the sheet.</p>
+        <h3>✏️ Editing, Duplicating &amp; Deleting</h3>
+        <p>Click any tank card to open the detail panel. From there you can:</p>
+        <ul>
+          <li><strong>Edit</strong> — modify all fields. Changes sync to the Google Sheet immediately.</li>
+          <li><strong>Duplicate</strong> — create a new pre-filled tank with the same line, markers, status, and location. Tank ID, photo, and notes are cleared so you can fill them in fresh.</li>
+          <li><strong>Delete from Inventory</strong> — permanently removes the tank. <em>This can't be undone.</em></li>
+        </ul>
+        <p><strong>If you move a tank, update its status and location in the inventory.</strong> All changes are also saved to a Changelog tab on the sheet.</p>
       </div>
 
       <div class="guide-section">
         <h3>🔍 Searching &amp; Filtering</h3>
-        <p>Use the search bar to find tanks by line, genotype, location, notes, or marker. Use the status chips (<em>Active, Nursery, Incubator…</em>) to filter by status. Use the <strong>+Markers</strong> / <strong>−Markers</strong> dropdowns to filter by confirmed presence or absence of transgenes. On mobile, tap <strong>⚙ Filters</strong> to access all options.</p>
+        <p>Use the search bar to find tanks by line, location, notes, or marker. Use the status chips (<em>Active, Nursery, Incubator…</em>) to filter by status. Use the <strong>+Markers</strong> / <strong>−Markers</strong> / <strong>?Markers</strong> dropdowns to filter by confirmed presence, confirmed absence, or unsorted (pending) transgenes. On mobile, tap <strong>⚙ Filters</strong> to access all options.</p>
+      </div>
+
+      <div class="guide-section">
+        <h3>☑️ Selection Mode</h3>
+        <p>Tap <strong>☑ Select</strong> to enter selection mode. Click individual cards or <strong>shift-click</strong> to range-select a group. From the selection bar you can:</p>
+        <ul>
+          <li><strong>Add to Experiment</strong> — bulk-add selected tanks to any existing experiment via the dropdown.</li>
+          <li><strong>Delete</strong> — bulk-delete selected tanks from the inventory. <em>This can't be undone.</em></li>
+        </ul>
+        <p>When inside an experiment, the Select button lets you pick tanks to <strong>remove</strong> from that experiment (without deleting from inventory).</p>
       </div>
 
       <div class="guide-section">
         <h3>🧪 Experiments</h3>
-        <p>Use <strong>🧪 ▾</strong> in the header to create or open an experiment. Experiments are named collections of tanks stored as separate tabs in the same Google Sheet.</p>
+        <p>Use <strong>🧪 ▾</strong> in the header to create or open an experiment. Experiments are named collections of tanks stored as separate tabs in the same Google Sheet — useful for grouping tanks by project or cross.</p>
         <ul>
-          <li>Click <strong>+ New</strong> in the dropdown to create one.</li>
-          <li>Once inside, click <strong>+ Add Tanks</strong> to pick tanks from the inventory.</li>
-          <li>Click <strong>✕ Remove</strong> on a card to remove it from the experiment without deleting it.</li>
+          <li>Click <strong>+ New</strong> to create an experiment.</li>
+          <li>Click <strong>+ Add Tanks</strong> to enter selection mode — existing members are pre-selected. Confirm to save the new set.</li>
+          <li>Click <strong>⬤ Group</strong> to enter color-assignment mode. Choose a color (green, red, blue, yellow) then click tanks to assign them to that sub-group.</li>
+          <li>Toggle <strong>Group by Color</strong> in the experiment bar to sort cards by their assigned color, with color-coded section headers.</li>
           <li>Rename an experiment by clicking ✏️ in the experiment bar.</li>
+          <li>Click <strong>Delete</strong> to permanently remove the experiment. <em>This can't be undone.</em></li>
           <li>Click <strong>✕ Exit</strong> to return to the full inventory.</li>
-          <li>You may also add tanks to experiments by clicking on the <strong>tank widget</strong> in the inventory, then clicking on which experiment to add it to.</li>
+          <li>You can also add or remove a tank from any experiment directly from its detail drawer.</li>
         </ul>
       </div>
 
@@ -467,7 +538,7 @@
 
       <div class="guide-section guide-contact">
         <h3>✉️ Need Help or Access?</h3>
-        <p>Use <a href="https://docs.google.com/forms/d/e/1FAIpQLSeIfXMJv0xoscLQZt9HayQppR0_R46Szo6mrpLPrAVnqHwtZQ/viewform?usp=publish-editor" target="_blank">this form</a> for access requests, or email <a href="mailto:marvilla@bu.edu">marvilla@bu.edu</a> for bug reports, or any other issues.</p>
+        <p>Use <a href="https://docs.google.com/forms/d/e/1FAIpQLSeIfXMJv0xoscLQZt9HayQppR0_R46Szo6mrpLPrAVnqHwtZQ/viewform?usp=publish-editor" target="_blank">this form</a> for access requests, or email <a href="mailto:marvilla@bu.edu">marvilla@bu.edu</a> for bug reports or any other issues.</p>
       </div>
 
     </div>
@@ -476,6 +547,34 @@
 
 <!-- Toast -->
 <div id="toast" class="toast"></div>
+
+<!-- Unsorted Markers Migration Wizard -->
+<div id="unsorted-migrate-overlay" class="overlay">
+  <div class="modal-card loc-migrate-card">
+    <h2>? Migrate Genotype Data</h2>
+    <p class="loc-migrate-intro">
+      These tanks have data in the old <strong>Genotype</strong> column. Review each one — the original value is shown in gray. Add the correct <strong>Unsorted Markers</strong> (transgenes not yet confirmed + or −), then save. Tanks you leave empty will have no unsorted markers.
+    </p>
+    <div id="unsorted-migrate-list" class="loc-migrate-list unsorted-migrate-list"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" onclick="saveUnsortedMigration()">Save All &amp; Continue</button>
+      <button class="btn-secondary" onclick="skipUnsortedMigration()">Skip for now</button>
+    </div>
+  </div>
+</div>
+
+<!-- Location Migration Wizard -->
+<div id="loc-migrate-overlay" class="overlay">
+  <div class="modal-card loc-migrate-card">
+    <h2>📍 Fix Tank Locations</h2>
+    <p class="loc-migrate-intro">A few tanks have locations that don't match the new format. Use the pickers below to set them — this only runs once.</p>
+    <div id="loc-migrate-list" class="loc-migrate-list"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" onclick="saveMigratedLocations()">Save All &amp; Continue</button>
+      <button class="btn-secondary" onclick="skipMigration()">Skip for now</button>
+    </div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>
