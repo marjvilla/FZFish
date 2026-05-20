@@ -2029,6 +2029,22 @@ function renderRecentLines() {
   ).join('');
 }
 
+// ── Last location quick-fill ──────────────────────────────────────────────────
+function getLastLocation() {
+  return localStorage.getItem('fzfish-last-location') || '';
+}
+function saveLastLocation(loc) {
+  if (loc && loc !== 'Incubator') localStorage.setItem('fzfish-last-location', loc);
+}
+function renderLastLocation() {
+  const el  = document.getElementById('last-location-wrap');
+  if (!el) return;
+  const loc = getLastLocation();
+  if (!loc) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = `<button type="button" class="recent-line-pill" onclick="setLocInForm('${esc(loc)}');updateLocPreview()">Last: ${esc(loc)}</button>`;
+}
+
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
 window.openAddModal = function() {
   editingId = null; currentMarkers = []; currentNegMarkers = []; currentUnsortedMarkers = [];
@@ -2044,6 +2060,7 @@ window.openAddModal = function() {
   setLocInForm('');
   resetPhotoUI();
   renderRecentLines();
+  renderLastLocation();
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -2068,6 +2085,7 @@ window.openEditModal = function(id) {
   resetPhotoUI();
   if (currentPhotoUrl) showPhotoPreview(currentPhotoUrl);
   renderRecentLines();
+  renderLastLocation();
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -2096,6 +2114,7 @@ window.duplicateFish = function(id) {
   renderMarkerTags(); renderNegMarkerTags(); renderUnsortedMarkerTags();
   resetPhotoUI();
   renderRecentLines();
+  renderLastLocation();
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -2212,6 +2231,7 @@ window.saveFish = async function(e) {
   };
   record.id = record.tankId;
   addRecentLine(record.line);
+  saveLastLocation(record.location);
 
   if (editingId) {
     const idx = fishData.findIndex(x => x.id === editingId);
