@@ -90,13 +90,24 @@
             <div class="loc-selects-row" id="loc-selects-row">
               <div class="loc-select-group">
                 <span class="loc-select-label">#</span>
-                <input id="loc-num" class="loc-select loc-num-input" type="text" maxlength="1"
-                  inputmode="numeric" placeholder="1" value="1" oninput="updateLocPreview()" />
+                <select id="loc-num" class="loc-select" onchange="updateLocPreview()">
+                  <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+                </select>
+              </div>
+              <div class="loc-select-group" id="loc-side-group">
+                <span class="loc-select-label">Side</span>
+                <select id="loc-side" class="loc-select" onchange="updateLocPreview()">
+                  <option value="">—</option>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                </select>
               </div>
               <div class="loc-select-group">
                 <span class="loc-select-label">Shelf</span>
-                <input id="loc-shelf" class="loc-select loc-num-input" type="text" maxlength="1"
-                  inputmode="numeric" placeholder="1" value="1" oninput="updateLocPreview()" />
+                <select id="loc-shelf" class="loc-select" onchange="updateLocPreview()">
+                  <option>1</option><option>2</option><option>3</option><option>4</option>
+                  <option>5</option><option>6</option><option>7</option>
+                </select>
               </div>
               <span class="loc-preview" id="loc-preview"></span>
             </div>

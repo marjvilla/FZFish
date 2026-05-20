@@ -70,17 +70,17 @@ const DEMO = [
 function parseLocation(str) {
   if (!str) return null;
   const s = str.trim();
-  let m = s.match(/^[Rr](\d+)\s*[Ss](\d+)$/);
-  if (m) return { type: 'R', num: parseInt(m[1]), shelf: parseInt(m[2]) };
+  let m = s.match(/^[Rr](\d+)([ABab]?)\s*[Ss](\d+)$/);
+  if (m) return { type: 'R', num: parseInt(m[1]), side: m[2].toUpperCase(), shelf: parseInt(m[3]) };
   m = s.match(/^[Nn](\d+)\s*[Ss](\d+)$/);
-  if (m) return { type: 'N', num: parseInt(m[1]), shelf: parseInt(m[2]) };
-  if (/^[Ii]ncubator$/i.test(s)) return { type: 'I', num: null, shelf: null };
+  if (m) return { type: 'N', num: parseInt(m[1]), side: '', shelf: parseInt(m[2]) };
+  if (/^[Ii]ncubator$/i.test(s)) return { type: 'I', num: null, side: '', shelf: null };
   return null;
 }
 
-function formatLocation(type, num, shelf) {
+function formatLocation(type, num, shelf, side) {
   if (type === 'I') return 'Incubator';
-  if (type === 'R') return `R${num} S${shelf}`;
+  if (type === 'R') return `R${num}${side || ''} S${shelf}`;
   if (type === 'N') return `N${num} S${shelf}`;
   return '';
 }
@@ -1286,12 +1286,9 @@ window.filterFish = function() {
     }
     if (!q) return true;
     return (
-      f.line.toLowerCase().includes(q)                                    ||
-      (f.unsorted || []).join(' ').toLowerCase().includes(q)              ||
-      f.location.toLowerCase().includes(q)                                ||
-      (f.markers    || []).some(m => m.toLowerCase().includes(q))         ||
-      (f.negMarkers || []).some(m => m.toLowerCase().includes(q))         ||
-      (f.notes      || '').toLowerCase().includes(q)
+      (f.line    || '').toLowerCase().includes(q) ||
+      (f.tankId  || '').toLowerCase().includes(q) ||
+      (f.notes   || '').toLowerCase().includes(q)
     );
   });
   sortFish();
@@ -1738,6 +1735,25 @@ function updateLocPicker() {
   if (!row) return;
   if (type === 'I') { row.classList.add('hidden'); updateLocPreview(); return; }
   row.classList.remove('hidden');
+
+  // Rebuild number select based on type (5 racks, 3 nursery)
+  const numSel = document.getElementById('loc-num');
+  if (numSel) {
+    const maxNum = type === 'R' ? 5 : 3;
+    const curNum = numSel.value || '1';
+    numSel.innerHTML = '';
+    for (let i = 1; i <= maxNum; i++) {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = i;
+      if (String(i) === String(curNum)) opt.selected = true;
+      numSel.appendChild(opt);
+    }
+  }
+
+  // Show A/B side only for rack
+  const sideGroup = document.getElementById('loc-side-group');
+  if (sideGroup) sideGroup.classList.toggle('hidden', type !== 'R');
+
   updateLocPreview();
 }
 
@@ -1745,29 +1761,34 @@ function updateLocPreview() {
   const type  = document.querySelector('input[name="loc-type"]:checked')?.value || 'R';
   const num   = document.getElementById('loc-num')?.value || '1';
   const shelf = document.getElementById('loc-shelf')?.value || '1';
+  const side  = type === 'R' ? (document.getElementById('loc-side')?.value || '') : '';
   const el    = document.getElementById('loc-preview');
-  if (el) el.textContent = formatLocation(type, num, shelf);
+  if (el) el.textContent = formatLocation(type, num, shelf, side);
 }
 
 function getLocFromForm() {
   const type  = document.querySelector('input[name="loc-type"]:checked')?.value || 'R';
   const num   = document.getElementById('loc-num')?.value || '1';
   const shelf = document.getElementById('loc-shelf')?.value || '1';
-  return formatLocation(type, num, shelf);
+  const side  = type === 'R' ? (document.getElementById('loc-side')?.value || '') : '';
+  return formatLocation(type, num, shelf, side);
 }
 
 function setLocInForm(str) {
   const parsed = parseLocation(str);
-  const type   = parsed?.type || 'R';
-  const num    = parsed?.num  || 1;
+  const type   = parsed?.type  || 'R';
+  const num    = parsed?.num   || 1;
   const shelf  = parsed?.shelf || 1;
+  const side   = parsed?.side  || '';
   const radio  = document.querySelector(`input[name="loc-type"][value="${type}"]`);
   if (radio) radio.checked = true;
   updateLocPicker();
   const numEl   = document.getElementById('loc-num');
   const shelfEl = document.getElementById('loc-shelf');
+  const sideEl  = document.getElementById('loc-side');
   if (numEl)   numEl.value   = num;
   if (shelfEl) shelfEl.value = shelf;
+  if (sideEl)  sideEl.value  = side;
   updateLocPreview();
 }
 
@@ -2569,10 +2590,11 @@ function startQuagga() {
       showToast(`📷 Scanned: ${code}`);
       return;
     }
-    const found = fishData.find(f => f.tankId === code);
-    showToast(`📷 Scanned: ${code}`);
+    const codeTrimmed = code.trim();
+    const found = fishData.find(f => f.tankId?.toLowerCase() === codeTrimmed.toLowerCase());
+    showToast(`📷 Scanned: ${codeTrimmed}`);
     if (found) openDrawer(found.id);
-    else { openAddModal(); document.getElementById('f-tank-id').value = code; }
+    else { openAddModal(); document.getElementById('f-tank-id').value = codeTrimmed; }
   });
 }
 function stopQuagga() {
@@ -2588,7 +2610,7 @@ window.manualBarcode = function() {
     showToast(`📷 Entered: ${v}`);
     return;
   }
-  const found = fishData.find(f => f.tankId === v);
+  const found = fishData.find(f => f.tankId?.toLowerCase() === v.toLowerCase());
   showToast(`📷 Scanned: ${v}`);
   if (found) openDrawer(found.id);
   else { openAddModal(); document.getElementById('f-tank-id').value = v; }

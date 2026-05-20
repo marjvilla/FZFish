@@ -363,7 +363,6 @@ body {
   color: var(--text); font-size: .88rem; cursor: pointer;
 }
 .loc-select:focus { outline: none; border-color: var(--accent); }
-.loc-num-input { width: 2.4rem; text-align: center; }
 .loc-preview {
   font-family: var(--font-mono); font-size: .82rem;
   color: var(--text-muted); margin-left: .25rem;
@@ -798,7 +797,7 @@ body.modal-open { overflow: hidden; }
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow);
   max-height: 230px; overflow-y: auto; -webkit-overflow-scrolling: touch; z-index: 250;
-  padding: .3rem 0;
+  padding: .3rem 0; touch-action: pan-y;
 }
 .mpick-row {
   display: flex; align-items: center; gap: .6rem;
@@ -1592,3 +1591,14 @@ body.modal-open { overflow: hidden; }
   padding-top: 1rem;
 }
 .guide-section a { color: var(--accent); }
+
+/* ── Touch device: suppress phantom hover flashes while scrolling ───────────
+   On mobile, touchstart triggers :hover before the browser knows the user is
+   scrolling. Disable hover background effects on any true-touch device.      */
+@media (hover: none) {
+  .mpick-row:hover         { background: transparent; }
+  .marker-check:hover      { background: transparent; }
+  .mf-row:hover            { background: transparent; }
+  .mini-stat:hover         { background: transparent; }
+  .stat-chip:hover         { transform: none; border-color: var(--border); }
+}
