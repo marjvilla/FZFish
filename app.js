@@ -45,6 +45,40 @@ let groupByColor      = false;
 let pickerSelected    = new Set();
 let sortDir           = -1;  // -1 = desc (newest first for dates), 1 = asc
 let imgOff            = localStorage.getItem('fzfish-img-off') === 'true';
+let deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+});
+
+window.triggerInstall = function() {
+  const isStandalone = window.navigator.standalone ||
+                       window.matchMedia('(display-mode: standalone)').matches;
+  if (isStandalone) { showToast('Already installed!'); return; }
+
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    deferredInstallPrompt.userChoice.then(() => { deferredInstallPrompt = null; });
+    return;
+  }
+
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const tip = document.getElementById('install-tooltip');
+  if (isIOS && tip) {
+    const visible = !tip.classList.contains('hidden');
+    tip.classList.toggle('hidden', visible);
+    if (!visible) setTimeout(() => tip.classList.add('hidden'), 5000);
+    return;
+  }
+
+  // Fallback: open help guide install section
+  openGuide();
+  setTimeout(() => {
+    const s = document.getElementById('guide-webapp-section');
+    if (s) { s.open = true; s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  }, 150);
+};
 
 // A  B     C          D    E      F         G            H       I      J        K      L
 // ID Line  Unsorted   Date Count  Location  PosMarkers   Status  Notes  Updated  Photo  NegMarkers

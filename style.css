@@ -132,6 +132,14 @@ body {
   margin-top: 1rem; text-align: center;
 }
 .setup-note a { color: var(--accent); }
+.install-tooltip {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .65rem 1rem;
+  font-size: .84rem; color: var(--text); margin-top: .4rem;
+  text-align: center; line-height: 1.5;
+  animation: fadeIn .15s ease;
+}
+.install-tooltip strong { color: var(--text); }
 
 /* Sign-in area */
 .signin-area { text-align: center; }

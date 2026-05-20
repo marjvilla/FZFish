@@ -38,7 +38,8 @@
       <button class="btn-ghost" onclick="useDemoMode()">Use Test Mode (Not Saved)</button>
       <p class="setup-note">Click the fish for help!</p>
       <p class="setup-note">Need access? <a href="https://docs.google.com/forms/d/e/1FAIpQLSeIfXMJv0xoscLQZt9HayQppR0_R46Szo6mrpLPrAVnqHwtZQ/viewform?usp=publish-editor" target="_blank">Request it here</a> or email <a href="mailto:marvilla@bu.edu">marvilla@bu.edu</a></p>
-      <p class="setup-note"><a href="#" onclick="openGuide();setTimeout(()=>{ const s=document.getElementById('guide-webapp-section'); if(s){s.open=true;s.scrollIntoView({behavior:'smooth',block:'start'});} },150);return false;">📲 Add to home screen</a></p>
+      <p class="setup-note"><a href="#" id="install-link" onclick="triggerInstall();return false;">📲 Add to home screen</a></p>
+      <div id="install-tooltip" class="install-tooltip hidden">Tap <strong>Share ⬆</strong> at the bottom of Safari, then <strong>Add to Home Screen</strong></div>
     </div>
   </div>
 </div>
