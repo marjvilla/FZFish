@@ -1357,7 +1357,9 @@ function renderGrid() {
     const groupColor = currentExperiment?.tankGroups?.[f.tankId] || null;
     card.className = `fish-card status-${f.status}${isSel ? ' card-selected' : ''}${groupColor ? ` card-group-${groupColor}` : ''}`;
     card.dataset.id = f.id;
-    card.style.animationDelay = `${idx * 0.04}s`;
+    // Only stagger-animate the first 15 cards — animating 100+ simultaneously
+    // creates that many GPU composite layers and causes scroll jank on mobile.
+    card.style.animationDelay = idx < 15 ? `${idx * 0.04}s` : '0s';
 
     const posHtml      = (f.markers    || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join('');
     const negHtml      = (f.negMarkers || []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join('');
@@ -1792,6 +1794,27 @@ function setLocInForm(str) {
   updateLocPreview();
 }
 
+// ── Status ↔ Location sync ───────────────────────────────────────────────────
+// Status → Location: Active→Rack, Nursery→Nursery, Incubator→Incubator
+window.syncStatusToLoc = function() {
+  const status = document.querySelector('input[name="status"]:checked')?.value;
+  const map = { Active: 'R', Nursery: 'N', Incubator: 'I' };
+  const locType = map[status];
+  if (!locType) return; // Low Stock / Breeding / Archived — don't force location
+  const radio = document.querySelector(`input[name="loc-type"][value="${locType}"]`);
+  if (radio && !radio.checked) { radio.checked = true; updateLocPicker(); }
+};
+
+// Location → Status: Rack→Active, Nursery→Nursery, Incubator→Incubator
+window.syncLocToStatus = function() {
+  const locType = document.querySelector('input[name="loc-type"]:checked')?.value;
+  const map = { R: 'Active', N: 'Nursery', I: 'Incubator' };
+  const status = map[locType];
+  if (!status) return;
+  const radio = document.querySelector(`input[name="status"][value="${status}"]`);
+  if (radio && !radio.checked) radio.checked = true;
+};
+
 // ── Migration wizards (dev access only — not auto-triggered) ──────────────────
 // To run from browser console: checkLocationMigration() or checkUnsortedMigration()
 window.checkLocationMigration = checkLocationMigration;
@@ -2153,6 +2176,18 @@ window.removePhoto = function() { currentPhotoUrl = null; pendingPhotoFile = nul
 window.saveFish = async function(e) {
   e.preventDefault();
   const saveBtn = document.getElementById('save-btn');
+
+  // Active tanks must have a valid barcode-style ID
+  const rawId  = document.getElementById('f-tank-id').value.trim().toUpperCase();
+  const status = document.querySelector('input[name="status"]:checked')?.value;
+  const hint   = document.getElementById('tank-id-hint');
+  if (status === 'Active' && !/^C\d{8}$/.test(rawId)) {
+    if (hint) hint.style.display = '';
+    document.getElementById('f-tank-id').focus();
+    return;
+  }
+  if (hint) hint.style.display = 'none';
+
   saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
 
   let photoUrl = currentPhotoUrl || '';
@@ -2568,6 +2603,29 @@ window.closeScanner = function() {
   scanForForm = false;
   stopQuagga(); checkScrollLock();
 };
+// Named handler so Quagga.offDetected can remove the exact same reference —
+// prevents duplicate listeners stacking up across multiple scan sessions.
+function handleBarcodeDetected(result) {
+  const code = result.codeResult.code?.trim() || '';
+  if (!/^C\d{8}$/i.test(code)) {
+    document.getElementById('scan-status').textContent = `⚠️ Bad scan (${code}) — expected C + 8 digits. Try again…`;
+    return;
+  }
+  // Valid — stop scanner and close overlay
+  stopQuagga();
+  document.getElementById('scan-overlay').classList.remove('active');
+  checkScrollLock();
+  showToast(`📷 Scanned: ${code.toUpperCase()}`);
+  if (scanForForm) {
+    scanForForm = false;
+    document.getElementById('f-tank-id').value = code.toUpperCase();
+    return;
+  }
+  const found = fishData.find(f => (f.tankId || '').trim().toLowerCase() === code.toLowerCase());
+  if (found) openDrawer(found.id);
+  else { openAddModal(); document.getElementById('f-tank-id').value = code.toUpperCase(); }
+}
+
 function startQuagga() {
   if (typeof Quagga === 'undefined') { document.getElementById('scan-status').textContent = 'Scanner not available. Use manual entry.'; return; }
   Quagga.init({
@@ -2578,35 +2636,23 @@ function startQuagga() {
     if (err) { document.getElementById('scan-status').textContent = 'Camera error — use manual entry.'; return; }
     Quagga.start(); scannerRunning = true;
     document.getElementById('scan-status').textContent = 'Point camera at barcode…';
-  });
-  Quagga.onDetected(result => {
-    const code = result.codeResult.code?.trim() || '';
-    const validBarcode = /^C\d{8}$/i.test(code);
-
-    if (!validBarcode) {
-      document.getElementById('scan-status').textContent = `⚠️ Bad scan (${code}) — expected C + 8 digits. Try again…`;
-      return;
-    }
-
-    // Valid — stop scanner and close overlay
-    stopQuagga();
-    document.getElementById('scan-overlay').classList.remove('active');
-    checkScrollLock();
-    showToast(`📷 Scanned: ${code.toUpperCase()}`);
-
-    if (scanForForm) {
-      scanForForm = false;
-      document.getElementById('f-tank-id').value = code.toUpperCase();
-      return;
-    }
-
-    const found = fishData.find(f => (f.tankId || '').trim().toLowerCase() === code.toLowerCase());
-    if (found) openDrawer(found.id);
-    else { openAddModal(); document.getElementById('f-tank-id').value = code.toUpperCase(); }
+    // Remove any existing listener before adding — prevents stacking across sessions
+    Quagga.offDetected(handleBarcodeDetected);
+    Quagga.onDetected(handleBarcodeDetected);
   });
 }
 function stopQuagga() {
-  if (scannerRunning && typeof Quagga !== 'undefined') { try { Quagga.stop(); } catch(_){} scannerRunning = false; }
+  if (scannerRunning && typeof Quagga !== 'undefined') {
+    try { Quagga.offDetected(handleBarcodeDetected); Quagga.stop(); } catch(_){}
+    scannerRunning = false;
+  }
+  // Force-stop camera tracks — Quagga.stop() doesn't always release the
+  // MediaStream on all browsers, leaving the camera active in the background.
+  try {
+    document.querySelectorAll('#interactive video').forEach(v => {
+      if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; }
+    });
+  } catch(_) {}
 }
 window.manualBarcode = function() {
   const v = document.getElementById('manual-barcode').value.trim().toUpperCase();

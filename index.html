@@ -62,9 +62,10 @@
         <div class="form-group full-width">
           <label>Tank ID</label>
           <div class="input-with-btn">
-            <input id="f-tank-id" type="text" placeholder="Should be Cxxxx if scanned" />
+            <input id="f-tank-id" type="text" placeholder="e.g. C12345678" oninput="this.value=this.value.toUpperCase()" />
             <button type="button" class="btn-scan-inline" onclick="openScannerForForm()" title="Scan barcode">📷</button>
           </div>
+          <p class="field-note" id="tank-id-hint" style="display:none">⚠️ Active tanks require a valid Tank ID (C + 8 digits). The ID is on the bottom-left of the Tank ID tag, starting with a C.</p>
         </div>
         <div class="form-group">
           <label>Line Name *</label>
@@ -83,9 +84,9 @@
           <label>Rack / Location</label>
           <div class="loc-picker">
             <div class="loc-type-row">
-              <label class="loc-type-opt rack-opt"><input type="radio" name="loc-type" value="R" checked onchange="updateLocPicker()"> Rack</label>
-              <label class="loc-type-opt nursery-opt"><input type="radio" name="loc-type" value="N" onchange="updateLocPicker()"> Nursery</label>
-              <label class="loc-type-opt incubator-opt"><input type="radio" name="loc-type" value="I" onchange="updateLocPicker()"> Incubator</label>
+              <label class="loc-type-opt rack-opt"><input type="radio" name="loc-type" value="R" checked onchange="updateLocPicker();syncLocToStatus()"> Rack</label>
+              <label class="loc-type-opt nursery-opt"><input type="radio" name="loc-type" value="N" onchange="updateLocPicker();syncLocToStatus()"> Nursery</label>
+              <label class="loc-type-opt incubator-opt"><input type="radio" name="loc-type" value="I" onchange="updateLocPicker();syncLocToStatus()"> Incubator</label>
             </div>
             <div class="loc-selects-row" id="loc-selects-row">
               <div class="loc-select-group">
@@ -150,9 +151,9 @@
         <div class="form-group full-width">
           <label>Status</label>
           <div class="status-picker">
-            <label class="status-opt active-opt"><input type="radio" name="status" value="Active" checked /> Active</label>
-            <label class="status-opt nursery-opt"><input type="radio" name="status" value="Nursery" /> Nursery</label>
-            <label class="status-opt incubator-opt"><input type="radio" name="status" value="Incubator" /> Incubator</label>
+            <label class="status-opt active-opt"><input type="radio" name="status" value="Active" checked onchange="syncStatusToLoc()" /> Active</label>
+            <label class="status-opt nursery-opt"><input type="radio" name="status" value="Nursery" onchange="syncStatusToLoc()" /> Nursery</label>
+            <label class="status-opt incubator-opt"><input type="radio" name="status" value="Incubator" onchange="syncStatusToLoc()" /> Incubator</label>
             <label class="status-opt low-opt"><input type="radio" name="status" value="Low Stock" /> Low Stock</label>
             <label class="status-opt breed-opt"><input type="radio" name="status" value="Breeding" /> Breeding</label>
             <label class="status-opt archive-opt"><input type="radio" name="status" value="Archived" /> Archived</label>
