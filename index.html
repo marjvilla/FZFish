@@ -273,9 +273,12 @@
   <!-- Mobile: mini stat counts + filter button (hidden on desktop) -->
   <div class="filter-toggle-bar" id="filter-toggle-bar">
     <div class="mini-stats-bar" id="mini-stats-bar"></div>
+    <button id="mob-img-btn" class="mob-icon-btn" onclick="toggleImgMode()" title="Toggle photos">🖼</button>
+    <button id="mob-sel-btn" class="mob-icon-btn" onclick="enterSelectionModeAuto()" title="Select tanks">☑</button>
     <button class="filter-toggle-btn" onclick="openMobileFilters()">
       ⚙ Filters<span id="filter-active-count"></span>
     </button>
+    <button class="mob-signout-btn" onclick="signOut()" title="Sign out">⏻</button>
   </div>
 
   <!-- Mobile filter bottom sheet -->

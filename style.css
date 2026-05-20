@@ -630,6 +630,30 @@ body.modal-open { overflow: hidden; }
 }
 .filter-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* Mobile-only icon buttons in the filter toggle bar */
+.mob-icon-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: var(--radius-sm);
+  width: 30px; height: 30px; font-size: .9rem; cursor: pointer; flex-shrink: 0;
+  display: none; align-items: center; justify-content: center;
+  transition: border-color var(--transition), color var(--transition), opacity var(--transition);
+}
+.mob-icon-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.mob-icon-btn.active { border-color: var(--accent); color: var(--accent); }
+.mob-signout-btn {
+  background: none; border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: var(--radius-sm);
+  width: 30px; height: 30px; font-size: 1rem; cursor: pointer; flex-shrink: 0;
+  display: none; align-items: center; justify-content: center;
+  margin-left: auto;
+  transition: border-color var(--transition), color var(--transition);
+}
+.mob-signout-btn:hover { border-color: var(--red); color: var(--red); }
+@media (max-width: 600px) {
+  .mob-icon-btn    { display: flex; }
+  .mob-signout-btn { display: flex; }
+}
+
 /* Mini stats bar inside toggle bar */
 .mini-stats-bar {
   display: flex; align-items: center; gap: .4rem;
@@ -770,6 +794,20 @@ body.modal-open { overflow: hidden; }
   transition: border-color var(--transition), color var(--transition);
 }
 .mf-dir-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.mf-dpf-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .5rem 1.25rem .75rem;
+}
+.mf-dpf-input {
+  width: 70px; padding: .55rem .6rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font-size: .9rem;
+  font-family: var(--font-body);
+}
+.mf-dpf-input:focus { outline: none; border-color: var(--accent); }
+.mf-dpf-sep   { color: var(--text-dim); font-size: .9rem; }
+.mf-dpf-label { color: var(--text-muted); font-size: .82rem; }
 
 /* Filter bar */
 .filter-bar {
@@ -1259,6 +1297,14 @@ body.modal-open { overflow: hidden; }
   .modal-actions .btn-ghost,
   .modal-actions .btn-primary { width: 100%; }
 
+  /* Slim down header-right so the search bar gets enough room */
+  .add-btn     { display: none; }   /* FAB handles this on mobile */
+  .btn-signout { display: none; }   /* rarely needed on mobile */
+  /* Browsers impose a ~170px min-width on inputs — override so search can shrink */
+  .header-center { min-width: 0; overflow: hidden; }
+  .search-wrap   { min-width: 0; }
+  #search-input  { min-width: 0; width: 100%; }
+
   /* Show filter toggle bar (Filters button only), hide full desktop panel */
   .filter-toggle-bar { display: flex; }
   .filter-panel { display: none; }
@@ -1726,4 +1772,6 @@ body.modal-open { overflow: hidden; }
   .btn-scan-inline:hover    { border-color: var(--border); }
   .marker-tag button:hover  { opacity: .6; }
   .guide-section summary:hover h3 { color: var(--text); }
+  .mob-icon-btn:hover    { border-color: var(--border); color: var(--text-muted); }
+  .mob-signout-btn:hover { border-color: var(--border); color: var(--text-muted); }
 }

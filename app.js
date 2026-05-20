@@ -89,8 +89,10 @@ function formatLocation(type, num, shelf, side) {
 window.addEventListener('DOMContentLoaded', () => {
   if (imgOff) {
     document.getElementById('app')?.classList.add('img-off');
-    const btn = document.getElementById('img-toggle-btn');
-    if (btn) btn.style.opacity = '0.4';
+    ['img-toggle-btn', 'mob-img-btn'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.style.opacity = '0.4';
+    });
   }
   if (localStorage.getItem('fzfish-demo') === 'true') { useDemoMode(); return; }
 
@@ -432,6 +434,7 @@ window.enterSelectionMode = function(context) {
   lastSelectionWasAdd = true;
   document.getElementById('selection-bar')?.classList.remove('hidden');
   document.getElementById('sel-mode-btn')?.classList.add('active');
+  document.getElementById('mob-sel-btn')?.classList.add('active');
   document.getElementById('app')?.classList.add('selecting');
   updateSelectionBar();
   renderGrid();
@@ -439,6 +442,7 @@ window.enterSelectionMode = function(context) {
 
 // Routes ☑ button: remove mode inside an experiment, general mode outside
 window.enterSelectionModeAuto = function() {
+  if (selectionMode) { exitSelectionMode(); return; }
   if (currentExperiment) enterSelectionModeForRemoval();
   else enterSelectionMode(null);
 };
@@ -511,6 +515,7 @@ window.exitSelectionMode = function() {
   closeAddToExpDropdown();
   document.getElementById('selection-bar')?.classList.add('hidden');
   document.getElementById('sel-mode-btn')?.classList.remove('active');
+  document.getElementById('mob-sel-btn')?.classList.remove('active');
   document.getElementById('app')?.classList.remove('selecting');
   // Re-enter the experiment if we were in add or remove context
   if (prevContext?.type === 'experiment' || prevContext?.type === 'experiment-remove') {
@@ -1662,8 +1667,10 @@ window.toggleImgMode = function() {
   imgOff = !imgOff;
   localStorage.setItem('fzfish-img-off', imgOff);
   document.getElementById('app')?.classList.toggle('img-off', imgOff);
-  const btn = document.getElementById('img-toggle-btn');
-  if (btn) btn.style.opacity = imgOff ? '0.4' : '1';
+  ['img-toggle-btn', 'mob-img-btn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.opacity = imgOff ? '0.4' : '1';
+  });
 };
 
 function refreshChips() {
@@ -1774,6 +1781,22 @@ window.buildMobileFilterSheet = function() {
         <option value="updated" ${sv==='updated' ? 'selected' : ''}>Last Updated</option>
       </select>
       <button class="mf-dir-btn" onclick="toggleSortDir();buildMobileFilterSheet()">${dir}</button>
+    </div>
+  </div>`;
+
+  // ── DPF range ──
+  const dpfMinVal = activeDpfMin !== null ? activeDpfMin : '';
+  const dpfMaxVal = activeDpfMax !== null ? activeDpfMax : '';
+  html += `<div class="mf-section"><div class="mf-section-title">Age (dpf)</div>
+    <div class="mf-dpf-row">
+      <input class="mf-dpf-input" type="number" min="0" placeholder="min"
+        value="${dpfMinVal}"
+        oninput="document.getElementById('dpf-min').value=this.value;applyDpfFilter()" />
+      <span class="mf-dpf-sep">–</span>
+      <input class="mf-dpf-input" type="number" min="0" placeholder="max"
+        value="${dpfMaxVal}"
+        oninput="document.getElementById('dpf-max').value=this.value;applyDpfFilter()" />
+      <span class="mf-dpf-label">dpf</span>
     </div>
   </div>`;
 
