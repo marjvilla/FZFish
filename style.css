@@ -1006,7 +1006,7 @@ body.modal-open { overflow: hidden; }
 .app.selecting .fab { display: none !important; }
 
 /* Extra grid padding so last card clears the selection bar */
-.app.selecting .fish-grid { padding-bottom: 8rem; }
+.app.selecting .fish-grid { padding-bottom: 8rem; touch-action: pan-y; }
 
 /* Allow vertical scroll even when tapping cards in selection mode */
 .app.selecting .fish-card { touch-action: pan-y; }
@@ -1592,13 +1592,52 @@ body.modal-open { overflow: hidden; }
 }
 .guide-section a { color: var(--accent); }
 
-/* ── Touch device: suppress phantom hover flashes while scrolling ───────────
-   On mobile, touchstart triggers :hover before the browser knows the user is
-   scrolling. Disable hover background effects on any true-touch device.      */
+/* ── Touch device: suppress ALL hover effects ───────────────────────────────
+   On mobile, touchstart fires :hover before the browser decides if the user
+   is tapping or scrolling — causes ghost highlights and layout jank.
+   @media (hover: none) targets any device without a true pointer hover.      */
 @media (hover: none) {
-  .mpick-row:hover         { background: transparent; }
-  .marker-check:hover      { background: transparent; }
-  .mf-row:hover            { background: transparent; }
-  .mini-stat:hover         { background: transparent; }
-  .stat-chip:hover         { transform: none; border-color: var(--border); }
+  /* Cards — kill the lift so scroll doesn't jank */
+  .fish-card:hover          { border-color: var(--border); transform: none; box-shadow: none; }
+
+  /* Buttons */
+  .btn-primary:hover        { filter: none; transform: none; }
+  .btn-ghost:hover          { border-color: var(--border); color: var(--text-muted); }
+  .btn-secondary:hover      { filter: none; }
+  .close-btn:hover          { background: var(--surface2); color: var(--text); }
+  .icon-btn:hover           { border-color: var(--border); }
+  .btn-tag-add:hover        { background: var(--surface2); color: var(--text); }
+  .logo-mark-btn:hover      { background: transparent; }
+
+  /* Marker picker rows */
+  .mpick-row:hover          { background: transparent; }
+  .marker-check:hover       { background: transparent; }
+  .marker-picker-btn:hover,
+  .marker-picker-btn-neg:hover,
+  .marker-picker-btn-unsorted:hover { filter: none; background: transparent;
+                                      border-color: var(--border); color: inherit; }
+  .mpick-add-trigger:hover  { opacity: 1; }
+
+  /* Filter bar */
+  .stat-chip:hover          { transform: none; border-color: var(--border); }
+  .filter-toggle-btn:hover  { border-color: var(--border); color: var(--text-muted); }
+  .marker-filter-btn:hover,
+  .neg-filter-btn:hover,
+  .unsorted-filter-btn:hover { background: transparent; }
+
+  /* Mobile filter sheet */
+  .mf-row:hover             { background: transparent; }
+  .mf-dir-btn:hover         { border-color: var(--border); color: var(--text); }
+  .mf-close-btn:hover       { background: var(--surface2); color: var(--text); }
+
+  /* Misc */
+  .mini-stat:hover          { background: transparent; }
+  .btn-signout:hover        { border-color: var(--border); color: var(--text-muted); }
+  .sel-btn:hover            { filter: none; opacity: 1; }
+  .sel-delete-btn:hover     { background: transparent; color: var(--red); }
+  .sel-btn.btn-primary:hover { opacity: 1; }
+  .photo-upload-btn:hover   { border-color: var(--border); color: var(--text-muted); }
+  .photo-remove-btn:hover   { background: var(--surface2); }
+  .btn-scan-inline:hover    { border-color: var(--border); }
+  .marker-tag button:hover  { opacity: .6; }
 }

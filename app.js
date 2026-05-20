@@ -2580,38 +2580,50 @@ function startQuagga() {
     document.getElementById('scan-status').textContent = 'Point camera at barcode…';
   });
   Quagga.onDetected(result => {
+    const code = result.codeResult.code?.trim() || '';
+    const validBarcode = /^C\d{8}$/i.test(code);
+
+    if (!validBarcode) {
+      document.getElementById('scan-status').textContent = `⚠️ Bad scan (${code}) — expected C + 8 digits. Try again…`;
+      return;
+    }
+
+    // Valid — stop scanner and close overlay
     stopQuagga();
     document.getElementById('scan-overlay').classList.remove('active');
     checkScrollLock();
-    const code = result.codeResult.code;
+    showToast(`📷 Scanned: ${code.toUpperCase()}`);
+
     if (scanForForm) {
       scanForForm = false;
-      document.getElementById('f-tank-id').value = code;
-      showToast(`📷 Scanned: ${code}`);
+      document.getElementById('f-tank-id').value = code.toUpperCase();
       return;
     }
-    const codeTrimmed = code.trim();
-    const found = fishData.find(f => f.tankId?.toLowerCase() === codeTrimmed.toLowerCase());
-    showToast(`📷 Scanned: ${codeTrimmed}`);
+
+    const found = fishData.find(f => (f.tankId || '').trim().toLowerCase() === code.toLowerCase());
     if (found) openDrawer(found.id);
-    else { openAddModal(); document.getElementById('f-tank-id').value = codeTrimmed; }
+    else { openAddModal(); document.getElementById('f-tank-id').value = code.toUpperCase(); }
   });
 }
 function stopQuagga() {
   if (scannerRunning && typeof Quagga !== 'undefined') { try { Quagga.stop(); } catch(_){} scannerRunning = false; }
 }
 window.manualBarcode = function() {
-  const v = document.getElementById('manual-barcode').value.trim();
+  const v = document.getElementById('manual-barcode').value.trim().toUpperCase();
   if (!v) return;
+  if (!/^C\d{8}$/.test(v)) {
+    document.getElementById('manual-barcode').focus();
+    showToast(`⚠️ Must be C + 8 digits (e.g. C12345678)`);
+    return;
+  }
   closeScanner();
+  showToast(`📷 Entered: ${v}`);
   if (scanForForm) {
     scanForForm = false;
     document.getElementById('f-tank-id').value = v;
-    showToast(`📷 Entered: ${v}`);
     return;
   }
-  const found = fishData.find(f => f.tankId?.toLowerCase() === v.toLowerCase());
-  showToast(`📷 Scanned: ${v}`);
+  const found = fishData.find(f => (f.tankId || '').trim().toUpperCase() === v);
   if (found) openDrawer(found.id);
   else { openAddModal(); document.getElementById('f-tank-id').value = v; }
 };
