@@ -82,6 +82,33 @@ Changes sync to the Google Sheet immediately. **If you move a tank, update its s
 
 ### 🔍 Searching & Filtering
 
+#### Basic search
+Type in the search bar to find tanks. Multiple words are treated as **AND** — all terms must match:
+```
+fli1 cd4          → tanks containing both "fli1" AND "cd4"
+R2A active        → tanks at R2A that also match "active"
+```
+
+#### Field-prefix syntax (power users)
+Prefix a term with a field name and `:` to target a specific field, regardless of the Fields selector:
+```
+line:fli1                  → line name contains "fli1"
+id:C12345678               → exact tank ID lookup
+notes:spine                → notes contain "spine"
+loc:R2A                    → location is R2A
+marker:eGFP                → any marker (+ / − / ?) contains "eGFP"
+status:nursery             → status is Nursery
+```
+Mix plain terms and field prefixes freely:
+```
+line:fli1 notes:uncertain  → fli1 line AND notes mention "uncertain"
+marker:eGFP status:active  → active tanks with eGFP marker
+```
+
+**Available prefixes:** `line:` · `id:` · `notes:` · `loc:` · `marker:` · `status:`
+
+---
+
 - **Search bar** — finds tanks by line, location, notes, or marker
 - **Status chips** — filter by Active, Nursery, Incubator, etc. (multi-select)
 - **+Markers / −Markers / ?Markers** — filter by confirmed presence, confirmed absence, or unsorted (pending) markers

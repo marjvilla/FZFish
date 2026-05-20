@@ -524,14 +524,14 @@ body.modal-open { overflow: hidden; }
 }
 .header-center { flex: 1; min-width: 0; }
 .search-wrap {
-  position: relative; display: flex; align-items: center;
+  position: relative; display: flex; align-items: center; gap: .5rem;
 }
 .search-icon {
   position: absolute; left: .7rem;
   color: var(--text-dim); font-size: 1.1rem; pointer-events: none;
 }
 #search-input {
-  width: 100%; padding: .55rem .85rem .55rem 2rem;
+  flex: 1; padding: .55rem .85rem .55rem 2rem;
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: 99px; color: var(--text); font-size: .9rem;
   font-family: var(--font-body);
@@ -541,6 +541,30 @@ body.modal-open { overflow: hidden; }
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
+/* Search field selector — desktop only */
+.search-fields-wrap { position: relative; flex-shrink: 0; }
+.search-fields-btn {
+  padding: .4rem .75rem; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 99px;
+  color: var(--text-muted); font-size: .8rem; cursor: pointer; white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition);
+}
+.search-fields-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.search-fields-btn.active { border-color: var(--accent); color: var(--accent); }
+.search-fields-dd {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: .4rem 0; z-index: 300; min-width: 150px;
+}
+.sf-row {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .5rem .9rem; font-size: .88rem; cursor: pointer;
+  color: var(--text); transition: background var(--transition);
+  user-select: none;
+}
+.sf-row:hover { background: var(--surface2); }
+.sf-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .header-right {
   display: flex; align-items: center; gap: .5rem; flex-shrink: 0;
 }
@@ -685,8 +709,23 @@ body.modal-open { overflow: hidden; }
 .mf-section:last-child { border-bottom: none; }
 .mf-section-title {
   font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--text-dim); padding: .75rem 1.25rem .35rem;
-  font-weight: 600;
+  color: var(--text-dim); font-weight: 600;
+}
+/* Accordion header — tappable row for marker sections */
+.mf-accordion-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; background: none; border: none; cursor: pointer;
+  padding: .75rem 1.25rem; text-align: left;
+  transition: background var(--transition);
+}
+.mf-accordion-hdr:active { background: var(--surface2); }
+.mf-accordion-arrow { font-size: .7rem; color: var(--text-dim); flex-shrink: 0; margin-left: .5rem; }
+/* Badge showing count of active filters in a collapsed section */
+.mf-active-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #000; border-radius: 99px;
+  font-size: .65rem; font-weight: 700; min-width: 1.1rem; height: 1.1rem;
+  padding: 0 .3rem; margin-left: .4rem; vertical-align: middle;
 }
 .mf-row {
   display: flex; align-items: center; gap: .75rem;
@@ -1220,9 +1259,21 @@ body.modal-open { overflow: hidden; }
   .modal-actions .btn-ghost,
   .modal-actions .btn-primary { width: 100%; }
 
-  /* Show mini-stat toggle bar, hide full desktop filter panel */
+  /* Show filter toggle bar (Filters button only), hide full desktop panel */
   .filter-toggle-bar { display: flex; }
   .filter-panel { display: none; }
+  .mini-stats-bar { display: none; }       /* remove status counts on mobile */
+  .search-fields-wrap { display: none; }   /* field selector desktop-only */
+
+  /* Card markers: collapse to one non-wrapping line with a right fade.
+     Full marker list is always accessible in the detail drawer.           */
+  .card-markers {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to right, black 70%, transparent 100%);
+    mask-image: linear-gradient(to right, black 70%, transparent 100%);
+    margin-bottom: .4rem;
+  }
 
   #picker-filter-sheet { z-index: 600; }
 }
@@ -1546,11 +1597,11 @@ body.modal-open { overflow: hidden; }
   color: var(--text);
   line-height: 1.5;
   flex-shrink: 0;
-  margin: .75rem 1.5rem 0;
+  margin: .75rem 1rem 0;
 }
 .guide-warning strong { color: #f85149; }
 .guide-links-bar {
-  padding: .5rem 1.5rem .1rem;
+  padding: .5rem 1rem .6rem;
   font-size: .85rem; color: var(--text-muted);
 }
 .guide-links-bar a { color: var(--accent); text-decoration: none; }
@@ -1559,26 +1610,61 @@ body.modal-open { overflow: hidden; }
 .guide-body {
   overflow-y: auto;
   flex: 1;
-  padding: 1rem 1.5rem 1.5rem;
+  padding: .5rem 1rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0;
 }
 
-.guide-section h3 {
+/* ── Guide accordion (details/summary) ── */
+.guide-section {
+  border-bottom: 1px solid var(--border);
+}
+.guide-section:last-child {
+  border-bottom: none;
+}
+.guide-section summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .75rem .5rem;
+  cursor: pointer;
+  user-select: none;
+  gap: .5rem;
+}
+.guide-section summary::-webkit-details-marker { display: none; }
+.guide-section summary::after {
+  content: '▼';
+  font-size: .65rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  transition: transform var(--transition);
+}
+.guide-section[open] summary::after {
+  transform: rotate(-180deg);
+}
+.guide-section summary h3 {
   font-size: .95rem;
   font-weight: 700;
-  margin: 0 0 .4rem;
+  margin: 0;
   color: var(--text);
+  flex: 1;
+}
+.guide-section summary:hover h3 { color: var(--accent); }
+.guide-section > p,
+.guide-section > ul {
+  padding: 0 .5rem .85rem;
 }
 .guide-section p {
   font-size: .87rem;
   color: var(--text-muted);
   line-height: 1.6;
-  margin: 0;
+  margin: 0 0 .5rem;
 }
+.guide-section p:last-child { margin-bottom: 0; }
 .guide-section ul {
-  margin: .4rem 0 0 1rem;
+  margin: .25rem 0 0 1rem;
   padding: 0;
   font-size: .87rem;
   color: var(--text-muted);
@@ -1588,7 +1674,6 @@ body.modal-open { overflow: hidden; }
 .guide-section em { color: var(--text-dim); font-style: normal; }
 .guide-contact {
   border-top: 1px solid var(--border);
-  padding-top: 1rem;
 }
 .guide-section a { color: var(--accent); }
 
@@ -1640,4 +1725,5 @@ body.modal-open { overflow: hidden; }
   .photo-remove-btn:hover   { background: var(--surface2); }
   .btn-scan-inline:hover    { border-color: var(--border); }
   .marker-tag button:hover  { opacity: .6; }
+  .guide-section summary:hover h3 { color: var(--text); }
 }

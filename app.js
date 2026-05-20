@@ -604,6 +604,18 @@ function buildAddToExpDropdown() {
 }
 
 let _addExpDdOpen = false;
+// Which marker accordion sections are expanded in the mobile filter sheet
+let mfExpanded = { pos: false, neg: false, uns: false };
+// Which fields the search bar indexes (desktop only — mobile always uses defaults)
+let searchFields = new Set(['line', 'tankId', 'notes']);
+const SEARCH_FIELD_OPTS = [
+  { key: 'line',     label: 'Line Name' },
+  { key: 'tankId',   label: 'Tank ID'   },
+  { key: 'notes',    label: 'Notes'     },
+  { key: 'location', label: 'Location'  },
+  { key: 'markers',  label: 'Markers'   },
+  { key: 'status',   label: 'Status'    },
+];
 window.toggleAddToExpDropdown = function(e) {
   e.stopPropagation();
   const dd = document.getElementById('sel-add-exp-dd');
@@ -623,6 +635,44 @@ function closeAddToExpDropdown() {
   _addExpDdOpen = false;
   document.getElementById('sel-add-exp-dd')?.classList.add('hidden');
 }
+
+// ── Search field selector (desktop only) ─────────────────────────────────────
+function updateSearchFieldsBtn() {
+  const btn = document.getElementById('search-fields-btn');
+  if (!btn) return;
+  const defaults = ['line', 'tankId', 'notes'];
+  const isDefault = searchFields.size === defaults.length && defaults.every(k => searchFields.has(k));
+  btn.textContent = isDefault ? 'Fields ▾' : `Fields · ${searchFields.size} ▾`;
+  btn.classList.toggle('active', !isDefault);
+}
+window.toggleSearchFieldsDd = function(e) {
+  e?.stopPropagation();
+  const dd = document.getElementById('search-fields-dd');
+  if (!dd) return;
+  const opening = dd.classList.contains('hidden');
+  dd.classList.toggle('hidden', !opening);
+  if (opening) {
+    dd.innerHTML = SEARCH_FIELD_OPTS.map(({ key, label }) => {
+      const on = searchFields.has(key);
+      return `<label class="sf-row">
+        <input type="checkbox" ${on ? 'checked' : ''}
+          onchange="toggleSearchField('${key}',this.checked)">
+        <span>${label}</span>
+      </label>`;
+    }).join('');
+    setTimeout(() => document.addEventListener('click', () => dd.classList.add('hidden'), { once: true }), 0);
+  }
+};
+window.toggleSearchField = function(key, checked) {
+  if (checked) {
+    searchFields.add(key);
+  } else {
+    if (searchFields.size > 1) searchFields.delete(key); // always keep at least one
+    else return; // don't uncheck the last one
+  }
+  updateSearchFieldsBtn();
+  filterFish();
+};
 
 window.addSelectedToExperiment = async function(expName) {
   const exp = experiments.find(e => e.name === expName);
@@ -700,6 +750,7 @@ window.deleteSelected = async function() {
     fishData = fishData.filter(f => f.id !== id);
   }
   showToast(`🗑 Deleted ${ids.length} tank${ids.length > 1 ? 's' : ''}`);
+  invalidateMarkerFreq();
   exitSelectionMode();
 };
 
@@ -1250,6 +1301,49 @@ function updateStats() {
   set('stat-archived',  count('Archived'));
 }
 
+// ── Search parsing ────────────────────────────────────────────────────────────
+// Supports multi-term AND logic and optional field:value prefixes.
+// e.g. "fli1 cd4"  →  both terms must match (across selected fields)
+//      "line:fli1 notes:spine"  →  field-specific per term
+const SEARCH_FIELD_ALIASES = {
+  line: 'line', l: 'line',
+  id: 'tankId', tankid: 'tankId',
+  notes: 'notes', note: 'notes',
+  location: 'location', loc: 'location',
+  marker: 'markers', markers: 'markers',
+  status: 'status',
+};
+function parseSearchTerms(raw) {
+  const terms = [];
+  // Match field:value (no spaces in value) or plain token
+  const re = /([a-z]+):(\S+)|(\S+)/gi;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    if (m[1]) {
+      const field = SEARCH_FIELD_ALIASES[m[1].toLowerCase()] || null;
+      terms.push({ field, value: m[2].toLowerCase() });
+    } else {
+      terms.push({ field: null, value: m[3].toLowerCase() });
+    }
+  }
+  return terms;
+}
+function matchSearchTerm(f, { field, value }) {
+  // field-prefixed term → search only that field
+  // plain term → search across all selected fields
+  const fields = field ? [field] : [...searchFields];
+  for (const key of fields) {
+    if (key === 'line'     && (f.line     || '').toLowerCase().includes(value)) return true;
+    if (key === 'tankId'   && (f.tankId   || '').toLowerCase().includes(value)) return true;
+    if (key === 'notes'    && (f.notes    || '').toLowerCase().includes(value)) return true;
+    if (key === 'location' && (f.location || '').toLowerCase().includes(value)) return true;
+    if (key === 'status'   && (f.status   || '').toLowerCase().includes(value)) return true;
+    if (key === 'markers'  && [...(f.markers||[]), ...(f.negMarkers||[]), ...(f.unsorted||[])]
+      .some(m => m.toLowerCase().includes(value))) return true;
+  }
+  return false;
+}
+
 window.filterFish = function() {
   const q = (document.getElementById('search-input').value || '').toLowerCase();
   const base = currentExperiment
@@ -1285,11 +1379,7 @@ window.filterFish = function() {
       if (activeDpfMax !== null && dpf > activeDpfMax) return false;
     }
     if (!q) return true;
-    return (
-      (f.line    || '').toLowerCase().includes(q) ||
-      (f.tankId  || '').toLowerCase().includes(q) ||
-      (f.notes   || '').toLowerCase().includes(q)
-    );
+    return parseSearchTerms(q).every(term => matchSearchTerm(f, term));
   });
   sortFish();
 };
@@ -1398,10 +1488,42 @@ function renderGrid() {
   });
 }
 
+// ── Marker frequency cache ────────────────────────────────────────────────────
+// Computed once from fishData, invalidated whenever fishData is mutated.
+// Markers are sorted most-used first so the picker shows frequent ones at top.
+let _markerFreq = null;
+
+function invalidateMarkerFreq() { _markerFreq = null; }
+
+function getMarkerFreq() {
+  if (_markerFreq) return _markerFreq;
+  const pos = new Map(), neg = new Map(), uns = new Map();
+  fishData.forEach(f => {
+    (f.markers    || []).forEach(m => pos.set(m, (pos.get(m) || 0) + 1));
+    (f.negMarkers || []).forEach(m => neg.set(m, (neg.get(m) || 0) + 1));
+    (f.unsorted   || []).forEach(m => uns.set(m, (uns.get(m) || 0) + 1));
+  });
+  _markerFreq = { pos, neg, uns };
+  return _markerFreq;
+}
+
+function byFreqDesc(map) {
+  return (a, b) => (map.get(b) || 0) - (map.get(a) || 0) || a.localeCompare(b);
+}
+
 // ── Marker datalists & dropdowns ──────────────────────────────────────────────
-function uniquePosMarkers()      { return [...new Set(fishData.flatMap(f => f.markers    || []))].sort(); }
-function uniqueNegMarkers()      { return [...new Set(fishData.flatMap(f => f.negMarkers || []))].sort(); }
-function uniqueUnsortedMarkers() { return [...new Set(fishData.flatMap(f => f.unsorted   || []))].sort(); }
+function uniquePosMarkers() {
+  const { pos } = getMarkerFreq();
+  return [...new Set(fishData.flatMap(f => f.markers    || []))].sort(byFreqDesc(pos));
+}
+function uniqueNegMarkers() {
+  const { neg } = getMarkerFreq();
+  return [...new Set(fishData.flatMap(f => f.negMarkers || []))].sort(byFreqDesc(neg));
+}
+function uniqueUnsortedMarkers() {
+  const { uns } = getMarkerFreq();
+  return [...new Set(fishData.flatMap(f => f.unsorted   || []))].sort(byFreqDesc(uns));
+}
 
 function updateMarkerDatalists() {
   const fill = (id, items) => { const el = document.getElementById(id); if (el) el.innerHTML = items.map(m => `<option value="${esc(m)}">`).join(''); };
@@ -1562,9 +1684,16 @@ function updateFilterSummary() {
 
 // ── Mobile filter sheet ───────────────────────────────────────────────────────
 window.openMobileFilters = function() {
+  // Reset accordion state each time the sheet opens — collapsed by default
+  mfExpanded = { pos: false, neg: false, uns: false };
   buildMobileFilterSheet();
   document.getElementById('mobile-filter-sheet').classList.add('open');
   document.body.classList.add('modal-open');
+};
+
+window.mfToggleSection = function(key) {
+  mfExpanded[key] = !mfExpanded[key];
+  buildMobileFilterSheet();
 };
 
 window.closeMobileFilters = function() {
@@ -1648,50 +1777,40 @@ window.buildMobileFilterSheet = function() {
     </div>
   </div>`;
 
-  // ── + Markers ──
-  const pm = [...new Set(baseData.flatMap(f => f.markers || []))].sort();
-  if (pm.length) {
-    html += '<div class="mf-section"><div class="mf-section-title">+ Markers (present)</div>';
-    pm.forEach(m => {
-      const on = activePosMarkers.has(m);
-      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
-          onclick="togglePosFilter('${esc(m)}',${!on});buildMobileFilterSheet()">
-        <span class="mf-check">${on ? '✓' : ''}</span>
-        <span class="mf-row-label mf-marker-pos">${esc(m)}</span>
+  // Helper: render a collapsible marker accordion section
+  function mfMarkerSection(key, label, markers, activeSet, toggleFn, rowCls) {
+    if (!markers.length) return '';
+    const activeCount = markers.filter(m => activeSet.has(m)).length;
+    // Auto-expand if any markers in this section are active
+    const open = mfExpanded[key] || activeCount > 0;
+    const badge = activeCount ? `<span class="mf-active-badge">${activeCount}</span>` : '';
+    let s = `<div class="mf-section mf-accordion${open ? ' mf-accordion-open' : ''}">
+      <button class="mf-accordion-hdr" onclick="mfToggleSection('${key}')">
+        <span class="mf-section-title">${label}${badge}</span>
+        <span class="mf-accordion-arrow">${open ? '▲' : '▼'}</span>
       </button>`;
-    });
-    html += '</div>';
+    if (open) {
+      markers.forEach(m => {
+        const on = activeSet.has(m);
+        s += `<button class="mf-row${on ? ' mf-row-active' : ''}"
+            onclick="${toggleFn}('${esc(m)}',${!on});buildMobileFilterSheet()">
+          <span class="mf-check">${on ? '✓' : ''}</span>
+          <span class="mf-row-label ${rowCls}">${esc(m)}</span>
+        </button>`;
+      });
+    }
+    s += '</div>';
+    return s;
   }
 
-  // ── − Markers ──
-  const nm = [...new Set(baseData.flatMap(f => f.negMarkers || []))].sort();
-  if (nm.length) {
-    html += '<div class="mf-section"><div class="mf-section-title">− Markers (absent)</div>';
-    nm.forEach(m => {
-      const on = activeNegMarkers.has(m);
-      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
-          onclick="toggleNegFilter('${esc(m)}',${!on});buildMobileFilterSheet()">
-        <span class="mf-check">${on ? '✓' : ''}</span>
-        <span class="mf-row-label mf-marker-neg">${esc(m)}</span>
-      </button>`;
-    });
-    html += '</div>';
-  }
+  const { pos: pf, neg: nf, uns: uf } = getMarkerFreq();
+  const pm = [...new Set(baseData.flatMap(f => f.markers    || []))].sort(byFreqDesc(pf));
+  const nm = [...new Set(baseData.flatMap(f => f.negMarkers || []))].sort(byFreqDesc(nf));
+  const um = [...new Set(baseData.flatMap(f => f.unsorted   || []))].sort(byFreqDesc(uf));
 
-  // ── ? Unsorted Markers ──
-  const um = [...new Set(baseData.flatMap(f => f.unsorted || []))].sort();
-  if (um.length) {
-    html += '<div class="mf-section"><div class="mf-section-title">? Markers (unsorted)</div>';
-    um.forEach(m => {
-      const on = activeUnsortedMarkers.has(m);
-      html += `<button class="mf-row${on ? ' mf-row-active' : ''}"
-          onclick="toggleUnsortedFilter('${esc(m)}',${!on});buildMobileFilterSheet()">
-        <span class="mf-check">${on ? '✓' : ''}</span>
-        <span class="mf-row-label mf-marker-unsorted">${esc(m)}</span>
-      </button>`;
-    });
-    html += '</div>';
-  }
+  html += mfMarkerSection('pos', '+ Markers (present)',  pm, activePosMarkers,      'togglePosFilter',      'mf-marker-pos');
+  html += mfMarkerSection('neg', '− Markers (absent)',   nm, activeNegMarkers,      'toggleNegFilter',      'mf-marker-neg');
+  html += mfMarkerSection('uns', '? Markers (unsorted)', um, activeUnsortedMarkers, 'toggleUnsortedFilter', 'mf-marker-unsorted');
 
   body.innerHTML = html;
 };
@@ -2042,7 +2161,7 @@ function renderLastLocation() {
   const loc = getLastLocation();
   if (!loc) { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  el.innerHTML = `<button type="button" class="recent-line-pill" onclick="setLocInForm('${esc(loc)}');updateLocPreview()">Last: ${esc(loc)}</button>`;
+  el.innerHTML = `<button type="button" class="recent-line-pill" onclick="setLocInForm('${esc(loc)}');updateLocPreview();syncLocToStatus()">Last: ${esc(loc)}</button>`;
 }
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
@@ -2268,6 +2387,7 @@ window.saveFish = async function(e) {
   }
 
   saveBtn.disabled = false; saveBtn.textContent = 'Save Tank';
+  invalidateMarkerFreq();
   closeModal(); renderAll();
 };
 
@@ -2491,6 +2611,7 @@ window.deleteFish = async function(id) {
     }
   }
   showToast('🗑 Tank deleted');
+  invalidateMarkerFreq();
   closeDrawer(); renderAll();
 };
 
