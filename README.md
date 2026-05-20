@@ -50,7 +50,6 @@ Set the tank's status when adding or editing. Used to filter the inventory:
 | **Active** | Adult fish living on the rack |
 | **Nursery** | Fish in the nursery system |
 | **Incubator** | Embryos or early larvae in the incubator |
-| **Low Stock** | Fewer fish than desired; flagged for expansion |
 | **Breeding** | Currently set up in a breeding cross |
 | **Archived** | No longer active; kept for record |
 
@@ -145,6 +144,24 @@ You can also add or remove a tank from any experiment directly from its detail d
 ### ⟳ Syncing
 
 Click **⟳** to pull the latest data from the Google Sheet. The app syncs automatically on sign-in. All edits are written directly to the sheet — no manual export needed.
+
+---
+
+### 📲 Installing as an App
+
+FZFish can be installed to your home screen and opens full-screen like a native app — no App Store needed.
+
+**iPhone / iPad (Safari only):**
+1. Open the site in Safari
+2. Tap the **Share** button (box with arrow, bottom of screen)
+3. Tap **Add to Home Screen** → **Add**
+
+**Android (Chrome):**
+1. Open the site in Chrome
+2. Tap **⋮ menu** → **Add to Home screen**, or accept the **Install app** banner
+
+**Desktop (Chrome / Edge):**
+- Click the **install icon ⊕** in the address bar, or go to the browser menu → **Install FZFish**
 
 ---
 

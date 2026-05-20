@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>FZFish — Fish Inventory</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FZFish" />
+  <meta name="theme-color" content="#0d1117" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -31,6 +38,7 @@
       <button class="btn-ghost" onclick="useDemoMode()">Use Test Mode (Not Saved)</button>
       <p class="setup-note">Click the fish for help!</p>
       <p class="setup-note">Need access? <a href="https://docs.google.com/forms/d/e/1FAIpQLSeIfXMJv0xoscLQZt9HayQppR0_R46Szo6mrpLPrAVnqHwtZQ/viewform?usp=publish-editor" target="_blank">Request it here</a> or email <a href="mailto:marvilla@bu.edu">marvilla@bu.edu</a></p>
+      <p class="setup-note"><a href="#" onclick="openGuide();setTimeout(()=>{ const s=document.getElementById('guide-webapp-section'); if(s){s.open=true;s.scrollIntoView({behavior:'smooth',block:'start'});} },150);return false;">📲 Add to home screen</a></p>
     </div>
   </div>
 </div>
@@ -155,7 +163,6 @@
             <label class="status-opt active-opt"><input type="radio" name="status" value="Active" checked onchange="syncStatusToLoc()" /> Active</label>
             <label class="status-opt nursery-opt"><input type="radio" name="status" value="Nursery" onchange="syncStatusToLoc()" /> Nursery</label>
             <label class="status-opt incubator-opt"><input type="radio" name="status" value="Incubator" onchange="syncStatusToLoc()" /> Incubator</label>
-            <label class="status-opt low-opt"><input type="radio" name="status" value="Low Stock" /> Low Stock</label>
             <label class="status-opt breed-opt"><input type="radio" name="status" value="Breeding" /> Breeding</label>
             <label class="status-opt archive-opt"><input type="radio" name="status" value="Archived" /> Archived</label>
           </div>
@@ -307,7 +314,6 @@
         <button class="chip" data-filter="Active" onclick="setFilter('Active')">Active</button>
         <button class="chip" data-filter="Nursery" onclick="setFilter('Nursery')">Nursery</button>
         <button class="chip" data-filter="Incubator" onclick="setFilter('Incubator')">Incubator</button>
-        <button class="chip" data-filter="Low Stock" onclick="setFilter('Low Stock')">Low Stock</button>
         <button class="chip" data-filter="Archived" onclick="setFilter('Archived')">Archived</button>
       </div>
       <div class="filter-right">
@@ -494,7 +500,6 @@
           <li><strong>Active</strong> — Adult fish living on the rack.</li>
           <li><strong>Nursery</strong> — Fish in the nursery system.</li>
           <li><strong>Incubator</strong> — Embryos or early larvae currently in the incubator.</li>
-          <li><strong>Low Stock</strong> — Fewer fish than desired; flag for expansion.</li>
           <li><strong>Breeding</strong> — Currently set up in a breeding cross.</li>
           <li><strong>Archived</strong> — No longer active; kept for record.</li>
         </ul>
@@ -565,6 +570,29 @@
       <details class="guide-section">
         <summary><h3>⟳ Syncing</h3></summary>
         <p>Click the <strong>⟳</strong> button to pull the latest data from the Google Sheet. The app syncs automatically on sign-in. All edits are written directly to the sheet — no manual export needed.</p>
+      </details>
+
+      <details class="guide-section" id="guide-webapp-section">
+        <summary><h3>📲 Install as an App</h3></summary>
+        <p>FZFish can be installed directly on your phone or computer — no App Store needed. It opens full-screen like a native app.</p>
+        <p><strong>iPhone / iPad (Safari):</strong></p>
+        <ul>
+          <li>Open the site in <strong>Safari</strong> (must be Safari, not Chrome).</li>
+          <li>Tap the <strong>Share</strong> button (the box with an arrow at the bottom of the screen).</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Tap <strong>Add</strong> — FZFish will appear on your home screen like any app.</li>
+        </ul>
+        <p><strong>Android (Chrome):</strong></p>
+        <ul>
+          <li>Open the site in <strong>Chrome</strong>.</li>
+          <li>Tap the <strong>⋮ menu</strong> (top-right) and tap <strong>Add to Home screen</strong>.</li>
+          <li>Or look for the <strong>Install app</strong> banner that appears automatically.</li>
+        </ul>
+        <p><strong>Desktop (Chrome / Edge):</strong></p>
+        <ul>
+          <li>Look for the <strong>install icon</strong> (⊕) in the address bar and click it.</li>
+          <li>Or open the browser menu and choose <strong>Install FZFish</strong>.</li>
+        </ul>
       </details>
 
       <details class="guide-section guide-contact">

@@ -60,7 +60,7 @@ const COL = {
 const DEMO = [
   { tankId:'demo-1', line:'fli1:EGFP',     unsorted:[], age:'2025-01-10', count:12, location:'R1 S2', markers:['EGFP','fli1'],    negMarkers:[],        status:'Active',    notes:'Healthy, spawning well', photoUrl:'', updated:'2025-04-20' },
   { tankId:'demo-2', line:'gata1:DsRed x AB',   unsorted:[], age:'2025-02-01', count:8,  location:'R1A S3', markers:['DsRed','gata1'],  negMarkers:['fli1'],  status:'Breeding',  notes:'Set up breeding pair',   photoUrl:'', updated:'2025-04-22' },
-  { tankId:'demo-3', line:'casper',            unsorted:[], age:'2024-12-05', count:3,  location:'R2B S3', markers:[],                 negMarkers:[],        status:'Low Stock', notes:'Need to expand',          photoUrl:'', updated:'2025-04-15' },
+  { tankId:'demo-3', line:'casper',            unsorted:[], age:'2024-12-05', count:3,  location:'R2B S3', markers:[],                 negMarkers:[],        status:'Breeding',  notes:'Need to expand',          photoUrl:'', updated:'2025-04-15' },
   { tankId:'demo-4', line:'mpeg1:mCherry', unsorted:[], age:'2025-03-15', count:20, location:'R2A S4', markers:[], negMarkers:['DsRed'], status:'Active',    notes:'mpeg?',                       photoUrl:'', updated:'2025-04-21' },
   { tankId:'demo-5', line:'AB WT',      unsorted:[], age:'2024-10-01', count:6,  location:'R3 S1', markers:[],                 negMarkers:[],        status:'Archived',  notes:'Retired breeders',        photoUrl:'', updated:'2025-03-10' },
   { tankId:'demo-6', line:'Tg(huc:GCaMP6s)',  unsorted:[], age:'2025-03-01', count:15, location:'N1 S1', markers:['GCaMP6s','huc'],  negMarkers:[],        status:'Nursery',   notes:'Imaging stock',           photoUrl:'', updated:'2025-04-23' },
@@ -887,7 +887,7 @@ window.openTankPicker = function() {
 };
 
 function buildPickerStatusChips() {
-  const statuses = ['Active','Nursery','Incubator','Low Stock','Breeding','Archived'];
+  const statuses = ['Active','Nursery','Incubator','Breeding','Archived'];
   const wrap = document.getElementById('picker-status-chips');
   if (!wrap) return;
   wrap.innerHTML = statuses.map(s =>
@@ -997,7 +997,7 @@ function updatePickerFilterCount() {
 function buildPickerFilterSheet() {
   const body = document.getElementById('picker-filter-body');
   if (!body) return;
-  const statuses = ['Active','Nursery','Incubator','Low Stock','Breeding','Archived'];
+  const statuses = ['Active','Nursery','Incubator','Breeding','Archived'];
   let html = '';
 
   // Status
@@ -1302,7 +1302,6 @@ function updateStats() {
   set('stat-active',    count('Active'));
   set('stat-nursery',   count('Nursery'));
   set('stat-incubator', count('Incubator'));
-  set('stat-low',       count('Low Stock'));
   set('stat-archived',  count('Archived'));
 }
 
@@ -1738,7 +1737,6 @@ window.buildMobileFilterSheet = function() {
     { key: 'Active',    cls: 'sc-active'    },
     { key: 'Nursery',   cls: 'sc-nursery'   },
     { key: 'Incubator', cls: 'sc-incubator' },
-    { key: 'Low Stock', cls: 'sc-low-stock' },
     { key: 'Archived',  cls: 'sc-archived'  },
   ];
   const baseData = currentExperiment
@@ -1845,7 +1843,6 @@ function updateMiniStats() {
     { key: 'Active',    cls: 'sc-active'    },
     { key: 'Nursery',   cls: 'sc-nursery'   },
     { key: 'Incubator', cls: 'sc-incubator' },
-    { key: 'Low Stock', cls: 'sc-low-stock' },
     { key: 'Archived',  cls: 'sc-archived'  },
   ];
   let html = `<span class="mini-stat" onclick="clearFilters()">
@@ -1942,7 +1939,7 @@ window.syncStatusToLoc = function() {
   const status = document.querySelector('input[name="status"]:checked')?.value;
   const map = { Active: 'R', Nursery: 'N', Incubator: 'I' };
   const locType = map[status];
-  if (!locType) return; // Low Stock / Breeding / Archived — don't force location
+  if (!locType) return; // Breeding / Archived — don't force location
   const radio = document.querySelector(`input[name="loc-type"][value="${locType}"]`);
   if (radio && !radio.checked) { radio.checked = true; updateLocPicker(); }
 };
