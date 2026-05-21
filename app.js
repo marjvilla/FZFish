@@ -2754,7 +2754,7 @@ window.openDrawer = function(id) {
       <h4>🧪 Experiments</h4>
       <div class="drawer-exp-list">
         ${experiments.map((exp, i) => {
-          const inExp = exp.tankIds.includes(f.tankId);
+          const inExp = (exp.tankIds || []).includes(f.tankId);
           return `<button id="exp-membership-${i}"
             class="drawer-exp-btn${inExp ? ' exp-member-active' : ''}"
             onclick="toggleTankInExperiment('${esc(f.tankId)}', ${i})">
