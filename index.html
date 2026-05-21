@@ -308,6 +308,17 @@
   <!-- Filter panel (stats + chips — desktop always visible, hidden on mobile) -->
   <div class="filter-panel" id="filter-panel">
 
+    <!-- Stats bar (desktop only, read-only) -->
+    <div class="stats-row" id="stats-row">
+      <span class="stats-row-item"><span class="stats-row-num" id="stat-total">—</span><span class="stats-row-label">Total</span></span>
+      <span class="stats-row-sep"></span>
+      <span class="stats-row-item"><span class="stats-row-num active-color" id="stat-active">—</span><span class="stats-row-label">Active</span></span>
+      <span class="stats-row-item"><span class="stats-row-num nursery-color" id="stat-nursery">—</span><span class="stats-row-label">Nursery</span></span>
+      <span class="stats-row-item"><span class="stats-row-num incubator-color" id="stat-incubator">—</span><span class="stats-row-label">Incubator</span></span>
+      <span class="stats-row-item"><span class="stats-row-num breed-color" id="stat-breeding">—</span><span class="stats-row-label">Breeding</span></span>
+      <span class="stats-row-item"><span class="stats-row-num" id="stat-archived">—</span><span class="stats-row-label">Archived</span></span>
+    </div>
+
     <!-- Filter + sort bar -->
     <div class="filter-bar">
       <div class="filter-chips" id="filter-chips">

@@ -818,6 +818,31 @@ body.modal-open { overflow: hidden; }
 .mf-dpf-label { color: var(--text-muted); font-size: .82rem; }
 
 /* Filter bar */
+/* ── Desktop stats row (read-only, hidden in experiment mode) ── */
+.stats-row {
+  display: flex; align-items: center; gap: .35rem;
+  padding: .45rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.stats-row-item {
+  display: flex; align-items: baseline; gap: .3rem;
+  padding: .15rem .5rem;
+}
+.stats-row-num {
+  font-family: var(--font-mono); font-size: 1rem; font-weight: 600; line-height: 1;
+  color: var(--text-muted);
+}
+.stats-row-label {
+  font-size: .68rem; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.stats-row-sep {
+  width: 1px; height: 1.1rem; background: var(--border); margin: 0 .2rem; flex-shrink: 0;
+}
+.filter-panel.exp-mode .stats-row { display: none; }
+
 .filter-bar {
   display: flex; align-items: center; justify-content: space-between;
   padding: .6rem 1.25rem; gap: .75rem;

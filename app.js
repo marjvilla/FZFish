@@ -493,6 +493,11 @@ const GROUP_LABELS = { green: '🟢', red: '🔴', blue: '🔵', yellow: '🟡' 
 window.enterSelectionModeForGroup = function(color) {
   const exp = currentExperiment;
   if (!exp) return;
+  // Toggle off if already in group mode for the same color
+  if (selectionMode && selectionContext?.type === 'experiment-group' && selectionContext?.color === color) {
+    exitSelectionMode();
+    return;
+  }
   enterSelectionMode({ type: 'experiment-group', exp, color });
 };
 
@@ -1336,6 +1341,7 @@ function updateStats() {
   set('stat-active',    count('Active'));
   set('stat-nursery',   count('Nursery'));
   set('stat-incubator', count('Incubator'));
+  set('stat-breeding',  count('Breeding'));
   set('stat-archived',  count('Archived'));
 }
 
@@ -1521,6 +1527,16 @@ function renderGrid() {
         </div>
       </div>
     `;
+    // Photo thumbnail: open lightbox (not drawer), unless in selection mode
+    const thumb = card.querySelector('.card-thumb');
+    if (thumb) {
+      thumb.style.cursor = 'zoom-in';
+      thumb.addEventListener('click', e => {
+        e.stopPropagation();
+        if (selectionMode) toggleCardSelection(f.id, idx, e.shiftKey);
+        else openLightbox(f.photoUrl);
+      });
+    }
     card.addEventListener('click', (e) => selectionMode ? toggleCardSelection(f.id, idx, e.shiftKey) : openDrawer(f.id));
     grid.appendChild(card);
   });
