@@ -306,10 +306,11 @@ function parseList(val) {
 }
 
 async function appendToSheets(record) {
-  const res   = await authFetch(
+  const res = await authFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(TAB_NAME)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [recordToRow(record)] }) }
   );
+  if (!res.ok) throw new Error(`Sheets append failed: ${res.status}`);
   const json  = await res.json();
   const match = json.updates?.updatedRange?.match(/(\d+)$/);
   return match ? parseInt(match[1]) : null;
@@ -345,7 +346,14 @@ window.syncSheets = async function() {
   const btn = document.getElementById('sync-btn');
   btn.classList.add('spinning');
   if (demoMode) { await new Promise(r => setTimeout(r, 600)); btn.classList.remove('spinning'); showToast('🐠 Demo mode — nothing to sync'); return; }
-  await fetchFromSheets(); await fetchExperiments(); renderAll(); btn.classList.remove('spinning');
+  try {
+    await fetchFromSheets(); await fetchExperiments(); renderAll();
+  } catch(e) {
+    showToast('⚠️ Sync failed — check your connection');
+    console.warn('syncSheets error:', e);
+  } finally {
+    btn.classList.remove('spinning');
+  }
 };
 
 // ── Experiments ──────────────────────────────────────────────────────────────
@@ -2376,10 +2384,17 @@ window.startThumbDrag = function(e) {
 window.handlePhotoSelect = function(input) {
   const file = input.files[0];
   if (!file) return;
+  // Revoke previous blob URL to avoid memory leak
+  const prev = document.getElementById('f-photo-preview')?.src;
+  if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
   pendingPhotoFile = file;
   showPhotoPreview(URL.createObjectURL(file));
 };
-window.removePhoto = function() { currentPhotoUrl = null; pendingPhotoFile = null; resetPhotoUI(); };
+window.removePhoto = function() {
+  const prev = document.getElementById('f-photo-preview')?.src;
+  if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+  currentPhotoUrl = null; pendingPhotoFile = null; resetPhotoUI();
+};
 
 window.saveFish = async function(e) {
   e.preventDefault();
@@ -2413,7 +2428,7 @@ window.saveFish = async function(e) {
     location:   getLocFromForm(),
     markers:    [...currentMarkers],
     negMarkers: [...currentNegMarkers],
-    status:     document.querySelector('input[name="status"]:checked').value,
+    status:     document.querySelector('input[name="status"]:checked')?.value || 'Active',
     notes:      document.getElementById('f-notes').value.trim(),
     photoUrl, thumbPos: currentThumbPos,
     updated: new Date().toISOString().slice(0, 16).replace('T', ' '),
@@ -2627,12 +2642,6 @@ window.addNewMarker = function(inputId) {
   input.blur();
 };
 
-// Escape key closes dropdowns and overlays
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  closeExperimentsDropdown();
-  if (!document.getElementById('tank-picker-overlay')?.classList.contains('hidden')) closeTankPicker();
-});
 
 // Close picker dropdowns on outside click
 document.addEventListener('click', e => {
@@ -2873,10 +2882,11 @@ window.manualBarcode = function() {
     showToast(`⚠️ Must be C + 8 digits (e.g. C12345678)`);
     return;
   }
+  // Save before closeScanner() resets it to false
+  const wasFormScan = scanForForm;
   closeScanner();
   showToast(`📷 Entered: ${v}`);
-  if (scanForForm) {
-    scanForForm = false;
+  if (wasFormScan) {
     document.getElementById('f-tank-id').value = v;
     return;
   }
@@ -2884,8 +2894,6 @@ window.manualBarcode = function() {
   if (found) openDrawer(found.id);
   else { openAddModal(); document.getElementById('f-tank-id').value = v; }
 };
-document.addEventListener('keydown', e => { if (e.target.id === 'manual-barcode' && e.key === 'Enter') manualBarcode(); });
-
 // ── Toast ─────────────────────────────────────────────────────────────────────
 let toastTimer;
 function showToast(msg) {
@@ -2895,9 +2903,14 @@ function showToast(msg) {
   toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
 }
 
-// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+// ── Keyboard shortcuts (single consolidated listener) ─────────────────────────
 document.addEventListener('keydown', e => {
-  if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); }
-  if (e.key==='Escape') { closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); }
-  if ((e.metaKey||e.ctrlKey) && e.key==='n') { e.preventDefault(); openAddModal(); }
+  if (e.target.id === 'manual-barcode' && e.key === 'Enter') { manualBarcode(); return; }
+  if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
+  if ((e.metaKey||e.ctrlKey) && e.key==='n') { e.preventDefault(); openAddModal(); return; }
+  if (e.key==='Escape') {
+    closeExperimentsDropdown();
+    if (!document.getElementById('tank-picker-overlay')?.classList.contains('hidden')) closeTankPicker();
+    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide();
+  }
 });
