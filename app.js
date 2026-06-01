@@ -46,6 +46,7 @@ let pickerSelected    = new Set();
 let sortDir           = -1;  // -1 = desc (newest first for dates), 1 = asc
 let imgOff            = localStorage.getItem('fzfish-img-off') === 'true';
 let deferredInstallPrompt = null;
+let alertCache            = null;   // null = not loaded; [] or array = loaded from sheet
 
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
@@ -249,7 +250,7 @@ function showApp() {
   const signoutBtn = document.getElementById('signout-btn');
   if (signoutBtn) signoutBtn.textContent = demoMode ? 'Exit Demo' : 'Sign Out';
   renderAll();
-  checkAlerts();
+  checkAlerts();   // async — fire-and-forget, badge/toast updates when ready
   // Migration wizards are intentionally not auto-triggered.
   // Run manually via console if needed: checkLocationMigration() or checkUnsortedMigration()
 }
@@ -364,7 +365,9 @@ window.syncSheets = async function() {
   btn.classList.add('spinning');
   if (demoMode) { await new Promise(r => setTimeout(r, 600)); btn.classList.remove('spinning'); showToast('🐠 Demo mode — nothing to sync'); return; }
   try {
+    alertCache = null;   // invalidate so next openAlertPanel re-fetches from sheet
     await fetchFromSheets(); await fetchExperiments(); renderAll();
+    checkAlerts();
   } catch(e) {
     showToast('⚠️ Sync failed — check your connection');
     console.warn('syncSheets error:', e);
@@ -817,7 +820,7 @@ window.deleteSelected = async function() {
       logChange('Deleted', fish, []);
     }
     fishData = fishData.filter(f => f.id !== id);
-    dismissAlertsForTank(id);
+    await dismissAlertsForTank(id);
   }
   showToast(`🗑 Deleted ${ids.length} tank${ids.length > 1 ? 's' : ''}`);
   invalidateMarkerFreq();
@@ -2535,20 +2538,20 @@ window.saveFish = async function(e) {
 
   // Alert: tank has a temp SPL-ID — remind to add real barcode in 3 days
   if (/^SPL-/i.test(record.tankId)) {
-    createAlert('split-id', record);
+    await createAlert('split-id', record);
   }
   // Alert: nursery tank without a valid barcode — remind in 3 days
   if (record.status === 'Nursery' && !/^C\d{8}$/.test(record.tankId)) {
-    createAlert('nursery-id', record);
+    await createAlert('nursery-id', record);
   }
   // Alert: baffle removal reminder checkbox
   if (document.getElementById('f-baffle-remind')?.checked) {
-    createAlert('baffle-remove', record);
+    await createAlert('baffle-remove', record);
   }
   // Auto-dismiss ID alerts when tank gets a real C+8 barcode
   if (editingId && /^C\d{8}$/.test(record.tankId)) {
-    if (/^SPL-/i.test(editingId)) dismissAlertsForTank(editingId, 'split-id');
-    dismissAlertsForTank(editingId, 'nursery-id');
+    if (/^SPL-/i.test(editingId)) await dismissAlertsForTank(editingId, 'split-id');
+    await dismissAlertsForTank(editingId, 'nursery-id');
   }
 
   invalidateMarkerFreq();
@@ -2768,7 +2771,7 @@ window.deleteFish = async function(id) {
       if (currentExperiment.tankGroups) delete currentExperiment.tankGroups[deletedId];
     }
   }
-  dismissAlertsForTank(id);
+  await dismissAlertsForTank(id);
   showToast('🗑 Tank deleted');
   invalidateMarkerFreq();
   closeDrawer(); renderAll();
@@ -2882,6 +2885,27 @@ window.openGuide = function() {
 window.closeGuide = function() {
   document.getElementById('guide-overlay').classList.remove('active');
   checkScrollLock();
+  const inp = document.getElementById('guide-search');
+  if (inp) { inp.value = ''; filterGuide(''); }
+};
+window.filterGuide = function(q) {
+  const term = (q || '').trim().toLowerCase();
+  const sections = document.querySelectorAll('#guide-overlay .guide-section');
+  let anyMatch = false;
+  sections.forEach(sec => {
+    if (!term) {
+      sec.style.display = '';
+      sec.open = false;
+      anyMatch = true;
+    } else {
+      const text = sec.textContent.toLowerCase();
+      const match = text.includes(term);
+      sec.style.display = match ? '' : 'none';
+      if (match) { sec.open = true; anyMatch = true; }
+    }
+  });
+  const noRes = document.getElementById('guide-no-results');
+  if (noRes) noRes.style.display = (!term || anyMatch) ? 'none' : '';
 };
 
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
@@ -2992,23 +3016,47 @@ window.copyToClip = function(text, label) {
 };
 
 // ── Alert system ─────────────────────────────────────────────────────────────
-const ALERT_KEY = 'fzfish-alerts';
+// Alerts are stored as a single JSON blob in changelog!Z1 — a far-off cell
+// that changelog append rows (columns A–F) never reach.  No new tab needed.
+const ALERT_KEY      = 'fzfish-alerts';
+const ALERTS_CELL    = 'changelog!Z1';   // reserved cell — do not use for changelog data
 
-function loadAlerts() {
-  try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '[]'); }
-  catch(e) { return []; }
+// ── Load alerts (sheet when signed in; localStorage in demo) ─────────────────
+async function loadAlerts() {
+  if (demoMode) {
+    try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '[]'); }
+    catch(e) { return []; }
+  }
+  if (alertCache !== null) return alertCache;
+  try {
+    const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(ALERTS_CELL)}`);
+    const json = await res.json();
+    const raw  = json.values?.[0]?.[0] || '[]';
+    alertCache = JSON.parse(raw);
+  } catch(e) { console.warn('loadAlerts:', e.message); alertCache = []; }
+  return alertCache;
 }
 
-function saveAlerts(alerts) {
-  localStorage.setItem(ALERT_KEY, JSON.stringify(alerts));
+// ── Save alerts (sheet when signed in; localStorage in demo) ─────────────────
+async function saveAlerts(alerts) {
+  if (demoMode) { localStorage.setItem(ALERT_KEY, JSON.stringify(alerts)); return; }
+  alertCache = alerts;
+  try {
+    await authFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(ALERTS_CELL)}?valueInputOption=RAW`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [[JSON.stringify(alerts)]] }) }
+    );
+  } catch(e) { console.warn('saveAlerts:', e.message); }
 }
 
-function createAlert(type, fish) {
-  const days = type === 'split-id' ? 3 : 7;
-  const alerts = loadAlerts();
+// ── Alert CRUD ────────────────────────────────────────────────────────────────
+async function createAlert(type, fish) {
+  const days   = type === 'baffle-remove' ? 7 : 3;
+  const alerts = await loadAlerts();
   if (alerts.some(a => !a.dismissed && a.type === type && a.tankInternalId === fish.id)) return;
   alerts.push({
-    id: 'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    id:             'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
     type,
     tankInternalId: fish.id,
     tankLine:       fish.line,
@@ -3017,50 +3065,51 @@ function createAlert(type, fish) {
     fireAt:         Date.now() + days * 24 * 60 * 60 * 1000,
     snoozedUntil:   null,
     dismissed:      false,
+    createdBy:      currentUser || '',
   });
-  saveAlerts(alerts);
+  await saveAlerts(alerts);
   renderAlertBadge();
 }
 
-window.dismissAlert = function(id) {
-  const alerts = loadAlerts().map(a => a.id === id ? { ...a, dismissed: true } : a);
-  saveAlerts(alerts);
+window.dismissAlert = async function(id) {
+  const alerts = (await loadAlerts()).map(a => a.id === id ? { ...a, dismissed: true } : a);
+  await saveAlerts(alerts);
   renderAlertBadge();
   buildAlertPanel();
 };
 
-function dismissAlertsForTank(tankInternalId, type) {
-  const alerts = loadAlerts().map(a =>
+async function dismissAlertsForTank(tankInternalId, type) {
+  const alerts = (await loadAlerts()).map(a =>
     a.tankInternalId === tankInternalId && (!type || a.type === type)
       ? { ...a, dismissed: true } : a
   );
-  saveAlerts(alerts);
+  await saveAlerts(alerts);
   renderAlertBadge();
 }
 
-window.snoozeAlert = function(id) {
-  const alerts = loadAlerts().map(a =>
+window.snoozeAlert = async function(id) {
+  const alerts = (await loadAlerts()).map(a =>
     a.id === id ? { ...a, snoozedUntil: Date.now() + 60 * 60 * 1000 } : a
   );
-  saveAlerts(alerts);
+  await saveAlerts(alerts);
   renderAlertBadge();
   buildAlertPanel();
 };
 
-function getActiveAlerts() {
+async function getActiveAlerts() {
   const now = Date.now();
-  return loadAlerts().filter(a =>
+  return (await loadAlerts()).filter(a =>
     !a.dismissed && a.fireAt <= now && (!a.snoozedUntil || a.snoozedUntil < now)
   );
 }
 
-function getUpcomingAlerts() {
+async function getUpcomingAlerts() {
   const now = Date.now();
-  return loadAlerts().filter(a => !a.dismissed && a.fireAt > now);
+  return (await loadAlerts()).filter(a => !a.dismissed && a.fireAt > now);
 }
 
-function renderAlertBadge() {
-  const count = getActiveAlerts().length;
+async function renderAlertBadge() {
+  const count = (await getActiveAlerts()).length;
   ['alert-btn', 'mob-alert-btn'].forEach(btnId => {
     const btn = document.getElementById(btnId);
     if (!btn) return;
@@ -3076,24 +3125,20 @@ function renderAlertBadge() {
   });
 }
 
-function checkAlerts() {
-  renderAlertBadge();
-  const active = getActiveAlerts();
+async function checkAlerts() {
+  await renderAlertBadge();
+  const active = await getActiveAlerts();
   if (active.length > 0) {
     showToast(`🔔 ${active.length} alert${active.length > 1 ? 's' : ''} need attention`);
   }
 }
 
 function alertMessage(a) {
-  const fish = fishData.find(f => f.id === a.tankInternalId);
-  const line = fish?.line || a.tankLine || '?';
-  const loc  = fish?.location || a.tankLocation || '?';
-  if (a.type === 'split-id') {
-    return `Add Tank ID to split tank: <strong>${esc(line)}</strong> at ${esc(loc)}`;
-  }
-  if (a.type === 'nursery-id') {
-    return `Add Tank ID to nursery tank: <strong>${esc(line)}</strong> at ${esc(loc)}`;
-  }
+  const fish  = fishData.find(f => f.id === a.tankInternalId);
+  const line  = fish?.line     || a.tankLine     || '?';
+  const loc   = fish?.location || a.tankLocation || '?';
+  if (a.type === 'split-id')   return `Add Tank ID to split tank: <strong>${esc(line)}</strong> at ${esc(loc)}`;
+  if (a.type === 'nursery-id') return `Add Tank ID to nursery tank: <strong>${esc(line)}</strong> at ${esc(loc)}`;
   if (a.type === 'baffle-remove') {
     const tankId = fish?.tankId || '';
     return `Remove mesh baffles: <strong>${esc(line)}</strong>${tankId ? ` (${esc(tankId)})` : ''} at ${esc(loc)}`;
@@ -3105,10 +3150,36 @@ function formatAlertDate(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-window.openAlertPanel = function() {
+// ── Local → global migration ──────────────────────────────────────────────────
+window.migrateLocalAlerts = async function() {
+  try {
+    const local = JSON.parse(localStorage.getItem(ALERT_KEY) || '[]').filter(a => !a.dismissed);
+    if (!local.length) { buildAlertPanel(); return; }
+    const existing = await loadAlerts();
+    const existIds = new Set(existing.map(a => a.id));
+    const toAdd    = local.filter(a => !existIds.has(a.id))
+                          .map(a => ({ ...a, createdBy: a.createdBy || currentUser || '' }));
+    await saveAlerts([...existing, ...toAdd]);
+    localStorage.removeItem(ALERT_KEY);
+    await renderAlertBadge();
+    buildAlertPanel();
+    showToast(`✅ Moved ${toAdd.length} alert${toAdd.length !== 1 ? 's' : ''} to shared`);
+  } catch(e) { showToast('❌ Migration failed'); console.error(e); }
+};
+
+window.clearLocalAlerts = function() {
+  localStorage.removeItem(ALERT_KEY);
   buildAlertPanel();
+  showToast('Local alerts cleared');
+};
+
+// ── Alert panel open / close / build ─────────────────────────────────────────
+window.openAlertPanel = async function() {
+  const body = document.getElementById('alert-panel-body');
+  if (body) body.innerHTML = '<p class="alert-empty">Loading…</p>';
   document.getElementById('alert-overlay').classList.add('active');
   checkScrollLock();
+  await buildAlertPanel();
 };
 
 window.closeAlertPanel = function() {
@@ -3116,18 +3187,36 @@ window.closeAlertPanel = function() {
   checkScrollLock();
 };
 
-function buildAlertPanel() {
+async function buildAlertPanel() {
   const body = document.getElementById('alert-panel-body');
   if (!body) return;
-  const active   = getActiveAlerts();
-  const upcoming = getUpcomingAlerts();
 
-  if (!active.length && !upcoming.length) {
+  const active   = await getActiveAlerts();
+  const upcoming = await getUpcomingAlerts();
+
+  // Migration banner — shown when signed-in user has leftover local alerts
+  let migrateBanner = '';
+  if (!demoMode) {
+    try {
+      const local = JSON.parse(localStorage.getItem(ALERT_KEY) || '[]').filter(a => !a.dismissed);
+      if (local.length) {
+        migrateBanner = `<div class="alert-migrate-banner">
+          <span>📦 ${local.length} local alert${local.length > 1 ? 's' : ''} from before shared sync</span>
+          <div class="alert-migrate-actions">
+            <button class="btn-xs btn-primary" onclick="migrateLocalAlerts()">Move to shared</button>
+            <button class="btn-xs btn-ghost"    onclick="clearLocalAlerts()">Clear local</button>
+          </div>
+        </div>`;
+      }
+    } catch(e) {}
+  }
+
+  if (!active.length && !upcoming.length && !migrateBanner) {
     body.innerHTML = '<p class="alert-empty">No alerts — all clear!</p>';
     return;
   }
 
-  let html = '';
+  let html = migrateBanner;
   if (active.length) {
     html += '<div class="alert-section-title">Due now</div>';
     active.forEach(a => {

@@ -3,7 +3,7 @@
 **GitHub:** [github.com/marjvilla/FZFish](https://github.com/marjvilla/FZFish)  
 **Live app:** [marjvilla.github.io/FZFish](https://marjvilla.github.io/FZFish/)
 
-A web-based zebrafish colony manager for Feng Lab, built on Google Sheets and Google Drive. Track tanks, filter by markers and status, scan barcodes, attach photos, organize tanks into named experiments, and sub-group them by color — all synced to a shared Google Sheet in real time.
+A web-based zebrafish colony manager for Feng Lab, built on Google Sheets and Google Drive. Track tanks, filter by markers and status, scan barcodes, attach photos, set reminders, organize tanks into named experiments, and sub-group them by color — all synced to a shared Google Sheet in real time.
 
 > ⚠️ **Please do not edit the Google Sheet directly.** All changes should be made through the app — editing the sheet manually can break the inventory for everyone.
 
@@ -23,10 +23,12 @@ Need access? Email [marvilla@bu.edu](mailto:marvilla@bu.edu) or use the in-app h
 
 Click **+ Add Tank** (desktop) or the **+** button (bottom-right on mobile). You may also scan a barcode to begin adding.
 
-- Scan the barcode with 📷 *(the barcode text is in the bottom-left of the label!)*. Fish in the incubator will auto-generate a Tank ID — but **please attach barcodes as soon as possible**.
+- Scan the barcode with 📷 *(the barcode text is in the bottom-left of the label!)*. Active tanks require a valid barcode ID — **please attach barcodes as soon as possible**.
+- No barcode yet? Click the **Split** button under Tank ID to auto-assign a temporary SPL-ID. A 3-day alert will remind you to add a real barcode.
 - Fill in the line name using **A:b;C:D x Z** formatting  
   *(e.g. `dbh:eGFP;CD4:mCherry x CD8:eGFP`)*
 - Input locations as **Rx Sy** or **Nx Sy** where R/N = rack or nursery, S = shelf number counting up from the ground.
+- In the Notes section, check **🔔 Remind me to remove mesh baffles in 7 days** if this tank is coming out of the nursery and needs baffle removal.
 - Add any important notes, including uncertain genes.
 
 ---
@@ -138,6 +140,22 @@ Use **🧪 ▾** in the header to create or open a named experiment. Experiments
 - **✕ Exit** — return to the full inventory
 
 You can also add or remove a tank from any experiment directly from its detail drawer.
+
+---
+
+### 🔔 Alerts
+
+Click the **🔔** button in the header (or mobile toolbar) to open the alert panel. FZFish automatically creates reminders for time-sensitive tasks:
+
+| Alert | Trigger | Fires after |
+|---|---|---|
+| **Split / temp ID** | Click **Split** under Tank ID | 3 days |
+| **Nursery ID** | Save a Nursery tank without a valid barcode | 3 days |
+| **Baffle removal** | Check the baffle reminder in Notes | 7 days |
+
+- Split and Nursery ID alerts **auto-dismiss** as soon as you save a real barcode (C + 8 digits) for that tank.
+- From the panel you can **Snooze** an alert for 1 hour or **Dismiss** it permanently.
+- Deleting a tank also dismisses all its alerts.
 
 ---
 

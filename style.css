@@ -1869,6 +1869,23 @@ body.modal-open { overflow: hidden; }
   .alert-btn:hover, .mob-alert-btn:hover { border-color: var(--border); color: var(--text-muted); }
 }
 
+/* ── Guide search ── */
+.guide-search-wrap {
+  margin-bottom: .75rem;
+}
+.guide-search-input {
+  width: 100%; padding: .45rem .75rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-size: .88rem; font-family: inherit;
+  outline: none; box-sizing: border-box;
+}
+.guide-search-input:focus { border-color: var(--accent); }
+.guide-no-results {
+  color: var(--text-muted); font-size: .85rem;
+  text-align: center; padding: .5rem 0 .75rem;
+}
+
 /* ── Alert bell button ── */
 .alert-btn {
   position: relative;
@@ -1928,6 +1945,18 @@ body.modal-open { overflow: hidden; }
 .btn-xs {
   font-size: .75rem; padding: .2rem .55rem;
   border-radius: var(--radius-sm);
+}
+
+.alert-migrate-banner {
+  background: rgba(var(--accent-rgb, 88,166,255),.08);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: .65rem .9rem;
+  margin-bottom: .75rem;
+  font-size: .85rem; color: var(--text);
+}
+.alert-migrate-actions {
+  display: flex; gap: .4rem; margin-top: .4rem; flex-wrap: wrap;
 }
 
 @media (max-width: 600px) {

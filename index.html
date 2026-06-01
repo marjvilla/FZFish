@@ -477,6 +477,11 @@
 
     <div class="guide-body">
 
+      <div class="guide-search-wrap">
+        <input type="search" id="guide-search" class="guide-search-input" placeholder="Search guide…" oninput="filterGuide(this.value)" />
+      </div>
+      <div id="guide-no-results" class="guide-no-results" style="display:none">No sections match — try different words.</div>
+
       <div class="guide-warning">
         ⚠️ <strong>Please do not edit the Google Sheet directly.</strong> All changes should be made through this app — editing the sheet manually can break the inventory for everyone.
       </div>
@@ -498,10 +503,11 @@
         <summary><h3>➕ Adding a Tank</h3></summary>
         <p>Click <strong>+ Add Tank</strong> (desktop) or the <strong>+</strong> button (bottom-right on mobile). You may also scan a new barcode to begin adding.</p>
         <ul>
-          <li>Attempt to scan the barcode with 📷 (<em>The barcode text is in the bottom left of the label!</em>). Fish in the incubator will auto-generate a Tank ID — <strong>please put barcodes on as soon as possible</strong>.</li>
+          <li>Scan the barcode with 📷 (<em>the barcode text is in the bottom-left of the label</em>). Active tanks require a valid barcode ID — <strong>please attach barcodes as soon as possible</strong>.</li>
+          <li>No barcode yet? Click the <strong>Split</strong> button under Tank ID to auto-assign a temporary SPL-ID. A 3-day alert will remind you to add a real barcode.</li>
           <li>Fill in the line name using <strong>A:b;C:D x Z</strong> formatting (<em>e.g. dbh:eGFP;CD4:mCherry x CD8:eGFP</em>).</li>
           <li>Input locations using <strong>Rx Sy</strong> or <strong>Nx Sy</strong> where R/N = rack or nursery, S = shelf counting up from the ground.</li>
-          <li>Add any important notes in the notes section.</li>
+          <li>In the Notes section, check <strong>🔔 Remind me to remove mesh baffles in 7 days</strong> if this tank is coming out of the nursery and needs baffle removal.</li>
         </ul>
       </details>
 
@@ -587,6 +593,17 @@
           <li>Click <strong>✕ Exit</strong> to return to the full inventory.</li>
           <li>You can also add or remove a tank from any experiment directly from its detail drawer.</li>
         </ul>
+      </details>
+
+      <details class="guide-section">
+        <summary><h3>🔔 Alerts</h3></summary>
+        <p>FZFish automatically sets reminders for time-sensitive tasks. Click the <strong>🔔</strong> button in the header (or mobile toolbar) to open the alert panel.</p>
+        <ul>
+          <li><strong>Split / temp ID alert</strong> — triggered when you click the <strong>Split</strong> button under Tank ID. A 3-day reminder will fire to prompt you to replace the temporary SPL-ID with a real barcode. The alert auto-dismisses as soon as you save a valid barcode (C + 8 digits) for that tank.</li>
+          <li><strong>Nursery ID alert</strong> — triggered silently when you save a Nursery tank without a valid barcode ID. A 3-day reminder will appear to prompt you to scan one in. Also auto-dismisses when a real barcode is saved.</li>
+          <li><strong>Baffle removal alert</strong> — check <strong>🔔 Remind me to remove mesh baffles in 7 days</strong> in the Notes section when saving a tank. A 7-day reminder will appear in the alert panel.</li>
+        </ul>
+        <p>From the alert panel you can <strong>Snooze</strong> any alert for 1 hour, or <strong>Dismiss</strong> it permanently. Deleting a tank also dismisses all its alerts.</p>
       </details>
 
       <details class="guide-section">
