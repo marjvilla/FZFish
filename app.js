@@ -2881,16 +2881,23 @@ window.closeLightbox = function() {
 window.openGuide = function() {
   document.getElementById('guide-overlay').classList.add('active');
   document.body.classList.add('modal-open');
+  // Focus search bar after transition so keyboard comes up naturally
+  setTimeout(() => document.getElementById('guide-search')?.focus(), 120);
 };
 window.closeGuide = function() {
   document.getElementById('guide-overlay').classList.remove('active');
   checkScrollLock();
+  clearGuideSearch();
+};
+window.clearGuideSearch = function() {
   const inp = document.getElementById('guide-search');
-  if (inp) { inp.value = ''; filterGuide(''); }
+  if (inp) inp.value = '';
+  filterGuide('');
 };
 window.filterGuide = function(q) {
   const term = (q || '').trim().toLowerCase();
   const sections = document.querySelectorAll('#guide-overlay .guide-section');
+  const clearBtn = document.getElementById('guide-search-clear');
   let anyMatch = false;
   sections.forEach(sec => {
     if (!term) {
@@ -2904,6 +2911,7 @@ window.filterGuide = function(q) {
       if (match) { sec.open = true; anyMatch = true; }
     }
   });
+  if (clearBtn) clearBtn.classList.toggle('hidden', !term);
   const noRes = document.getElementById('guide-no-results');
   if (noRes) noRes.style.display = (!term || anyMatch) ? 'none' : '';
 };

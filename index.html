@@ -475,12 +475,16 @@
       </div>
     </div>
 
-    <div class="guide-body">
-
+    <div class="guide-search-section">
       <div class="guide-search-wrap">
-        <input type="search" id="guide-search" class="guide-search-input" placeholder="Search guide…" oninput="filterGuide(this.value)" />
+        <span class="guide-search-icon">⌕</span>
+        <input type="text" id="guide-search" class="guide-search-input" placeholder="Search guide…" oninput="filterGuide(this.value)" autocomplete="off" />
+        <button class="guide-search-clear hidden" id="guide-search-clear" onclick="clearGuideSearch()" title="Clear search">✕</button>
       </div>
       <div id="guide-no-results" class="guide-no-results" style="display:none">No sections match — try different words.</div>
+    </div>
+
+    <div class="guide-body">
 
       <div class="guide-warning">
         ⚠️ <strong>Please do not edit the Google Sheet directly.</strong> All changes should be made through this app — editing the sheet manually can break the inventory for everyone.
