@@ -120,7 +120,15 @@ function formatLocation(type, num, shelf, side) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
+function updateHeaderHeight() {
+  const h = document.querySelector('.app-header');
+  if (h) document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px');
+}
+window.addEventListener('resize', updateHeaderHeight);
+
 window.addEventListener('DOMContentLoaded', () => {
+  // Measure header height after first paint for sticky filter bar offset
+  requestAnimationFrame(updateHeaderHeight);
   if (imgOff) {
     document.getElementById('app')?.classList.add('img-off');
     ['img-toggle-btn', 'mob-img-btn'].forEach(id => {
@@ -241,6 +249,7 @@ function showApp() {
   const signoutBtn = document.getElementById('signout-btn');
   if (signoutBtn) signoutBtn.textContent = demoMode ? 'Exit Demo' : 'Sign Out';
   renderAll();
+  checkAlerts();
   // Migration wizards are intentionally not auto-triggered.
   // Run manually via console if needed: checkLocationMigration() or checkUnsortedMigration()
 }
@@ -256,12 +265,20 @@ async function fetchUserInfo() {
 
 // ── Authenticated fetch ───────────────────────────────────────────────────────
 async function authFetch(url, options = {}) {
-  if (!accessToken || Date.now() > tokenExpiry) {
+  // Always try a silent refresh first — avoids "expired token" mid-save errors
+  try { await ensureToken(); } catch(e) {
     showToast('⚠️ Session expired — please sign in again.');
     signOut(); throw new Error('No valid token');
   }
   return fetch(url, { ...options, headers: { ...options.headers, 'Authorization': `Bearer ${accessToken}` } });
 }
+
+// Proactively refresh the token 3 minutes before expiry so saves never hit an expired token
+setInterval(() => {
+  if (!demoMode && accessToken && tokenExpiry && Date.now() > tokenExpiry - 3 * 60 * 1000) {
+    tokenClient?.requestAccessToken({ prompt: '' });
+  }
+}, 60 * 1000);
 
 // ── Google Sheets ─────────────────────────────────────────────────────────────
 async function fetchSheetGid() {
@@ -800,6 +817,7 @@ window.deleteSelected = async function() {
       logChange('Deleted', fish, []);
     }
     fishData = fishData.filter(f => f.id !== id);
+    dismissAlertsForTank(id);
   }
   showToast(`🗑 Deleted ${ids.length} tank${ids.length > 1 ? 's' : ''}`);
   invalidateMarkerFreq();
@@ -2002,6 +2020,29 @@ window.syncStatusToLoc = function() {
   if (radio && !radio.checked) { radio.checked = true; updateLocPicker(); }
 };
 
+// ── Split mode toggle (near Tank ID) ─────────────────────────────────────────
+let splitMode = false;
+
+window.toggleSplitMode = function() {
+  splitMode = !splitMode;
+  const btn  = document.getElementById('split-tag-btn');
+  const hint = document.getElementById('split-tag-hint');
+  const idEl = document.getElementById('f-tank-id');
+  if (splitMode) {
+    btn?.classList.add('active');
+    if (hint) hint.classList.remove('hidden');
+    // Auto-fill temp SPL-ID if field is empty or was a previous SPL-ID
+    if (!idEl.value || /^SPL-/i.test(idEl.value)) {
+      idEl.value = 'SPL-' + Math.random().toString(16).slice(2, 10).toUpperCase();
+    }
+  } else {
+    btn?.classList.remove('active');
+    if (hint) hint.classList.add('hidden');
+    // Clear the temp ID when un-toggling
+    if (/^SPL-/i.test(idEl.value)) idEl.value = '';
+  }
+};
+
 // Location → Status: Rack→Active, Nursery→Nursery, Incubator→Incubator
 window.syncLocToStatus = function() {
   const locType = document.querySelector('input[name="loc-type"]:checked')?.value;
@@ -2258,6 +2299,12 @@ window.openAddModal = function() {
   resetPhotoUI();
   renderRecentLines();
   renderLastLocation();
+  // Reset split mode
+  splitMode = false;
+  document.getElementById('split-tag-btn')?.classList.remove('active');
+  document.getElementById('split-tag-hint')?.classList.add('hidden');
+  const baffleEl = document.getElementById('f-baffle-remind');
+  if (baffleEl) baffleEl.checked = false;
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -2283,6 +2330,14 @@ window.openEditModal = function(id) {
   if (currentPhotoUrl) showPhotoPreview(currentPhotoUrl);
   renderRecentLines();
   renderLastLocation();
+  // Restore split mode if tank has a temp SPL-ID
+  splitMode = /^SPL-/i.test(f.tankId || '');
+  const splitBtn  = document.getElementById('split-tag-btn');
+  const splitHint = document.getElementById('split-tag-hint');
+  if (splitMode) { splitBtn?.classList.add('active'); splitHint?.classList.remove('hidden'); }
+  else           { splitBtn?.classList.remove('active'); splitHint?.classList.add('hidden'); }
+  const baffleEl = document.getElementById('f-baffle-remind');
+  if (baffleEl) baffleEl.checked = false;
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
@@ -2400,7 +2455,7 @@ window.saveFish = async function(e) {
   e.preventDefault();
   const saveBtn = document.getElementById('save-btn');
 
-  // Active tanks must have a valid barcode-style ID
+  // Active tanks must have a valid barcode-style ID; Split tanks don't yet
   const rawId  = document.getElementById('f-tank-id').value.trim().toUpperCase();
   const status = document.querySelector('input[name="status"]:checked')?.value;
   const hint   = document.getElementById('tank-id-hint');
@@ -2410,6 +2465,7 @@ window.saveFish = async function(e) {
     return;
   }
   if (hint) hint.style.display = 'none';
+  const oldStatus = editingId ? fishData.find(x => x.id === editingId)?.status : null;
 
   saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
 
@@ -2419,8 +2475,12 @@ window.saveFish = async function(e) {
     catch(err) { showToast('❌ Photo upload failed: ' + err.message); saveBtn.disabled = false; saveBtn.textContent = 'Save Tank'; return; }
   }
 
+  const enteredId = document.getElementById('f-tank-id').value.trim();
+  const fallbackId = editingId
+    ? (fishData.find(x => x.id === editingId)?.tankId || editingId)
+    : `tank-${Date.now()}`;
   const record = {
-    tankId:     document.getElementById('f-tank-id').value.trim() || (editingId ? (fishData.find(x => x.id === editingId)?.tankId || editingId) : `tank-${Date.now()}`),
+    tankId:     enteredId || fallbackId,
     line:       document.getElementById('f-line').value.trim(),
     unsorted:   [...currentUnsortedMarkers],
     age:        document.getElementById('f-age').value.trim(),
@@ -2472,6 +2532,25 @@ window.saveFish = async function(e) {
   }
 
   saveBtn.disabled = false; saveBtn.textContent = 'Save Tank';
+
+  // Alert: tank has a temp SPL-ID — remind to add real barcode in 3 days
+  if (/^SPL-/i.test(record.tankId)) {
+    createAlert('split-id', record);
+  }
+  // Alert: nursery tank without a valid barcode — remind in 3 days
+  if (record.status === 'Nursery' && !/^C\d{8}$/.test(record.tankId)) {
+    createAlert('nursery-id', record);
+  }
+  // Alert: baffle removal reminder checkbox
+  if (document.getElementById('f-baffle-remind')?.checked) {
+    createAlert('baffle-remove', record);
+  }
+  // Auto-dismiss ID alerts when tank gets a real C+8 barcode
+  if (editingId && /^C\d{8}$/.test(record.tankId)) {
+    if (/^SPL-/i.test(editingId)) dismissAlertsForTank(editingId, 'split-id');
+    dismissAlertsForTank(editingId, 'nursery-id');
+  }
+
   invalidateMarkerFreq();
   closeModal(); renderAll();
 };
@@ -2689,6 +2768,7 @@ window.deleteFish = async function(id) {
       if (currentExperiment.tankGroups) delete currentExperiment.tankGroups[deletedId];
     }
   }
+  dismissAlertsForTank(id);
   showToast('🗑 Tank deleted');
   invalidateMarkerFreq();
   closeDrawer(); renderAll();
@@ -2727,13 +2807,15 @@ window.openDrawer = function(id) {
 
   document.getElementById('drawer-content').innerHTML = `
     ${photoHtml}
-    <div class="drawer-line">${esc(f.line)}</div>
+    <div class="drawer-line copy-field" onclick="copyToClip('${esc(f.line)}','Line name')" title="Click to copy">${esc(f.line)}<span class="copy-icon">⎘</span></div>
+    <button class="btn-primary btn-sm drawer-edit-btn" onclick="closeDrawer();openEditModal('${esc(f.id)}')">Edit</button>
     <span class="status-badge badge-${f.status}" style="margin-top:.25rem;display:inline-block">${esc(f.status)}</span>
     <div class="drawer-section">
       <h4>Details</h4>
+      <div class="drawer-row"><span class="drawer-row-label">Tank ID</span><span class="drawer-row-val copy-field" onclick="copyToClip('${esc(f.tankId || '')}','Tank ID')" title="Click to copy">${esc(f.tankId || '—')}<span class="copy-icon">⎘</span></span></div>
       <div class="drawer-row"><span class="drawer-row-label">Fert. Date</span><span class="drawer-row-val">${formatDate(f.age)}${f.age ? ' · ' + calcDpf(f.age) + ' dpf' : ''}</span></div>
       <div class="drawer-row"><span class="drawer-row-label">Count</span><span class="drawer-row-val">${f.count || '—'}</span></div>
-      <div class="drawer-row"><span class="drawer-row-label">Location</span><span class="drawer-row-val">${esc(f.location || '—')}</span></div>
+      <div class="drawer-row"><span class="drawer-row-label">Location</span><span class="drawer-row-val copy-field" onclick="copyToClip('${esc(f.location || '')}','Location')" title="Click to copy">${esc(f.location || '—')}<span class="copy-icon">⎘</span></span></div>
       <div class="drawer-row"><span class="drawer-row-label">Last Updated</span><span class="drawer-row-val">${formatDateTime(f.updated)}</span></div>
     </div>
     <div class="drawer-section">
@@ -2764,11 +2846,10 @@ window.openDrawer = function(id) {
       </div>
     </div>` : ''}
     <div class="drawer-actions">
-      <button class="btn-primary" onclick="closeDrawer();openEditModal('${esc(f.id)}')">Edit</button>
       <button class="btn-ghost" onclick="closeDrawer();duplicateFish('${esc(f.id)}')">Duplicate</button>
       ${currentExperiment
         ? `<button class="btn-ghost" onclick="closeDrawer();removeFromExperiment('${esc(f.tankId)}',event)">Remove from Experiment</button>`
-        : `<button class="btn-ghost" onclick="closeDrawer();deleteFish('${esc(f.id)}')">Delete from Inventory</button>`}
+        : `<button class="btn-ghost danger-ghost" onclick="closeDrawer();deleteFish('${esc(f.id)}')">Delete from Inventory</button>`}
     </div>
   `;
   document.getElementById('detail-drawer').classList.add('open');
@@ -2894,6 +2975,190 @@ window.manualBarcode = function() {
   if (found) openDrawer(found.id);
   else { openAddModal(); document.getElementById('f-tank-id').value = v; }
 };
+// ── Copy to clipboard ─────────────────────────────────────────────────────────
+window.copyToClip = function(text, label) {
+  if (!text || text === '—') return;
+  navigator.clipboard?.writeText(text).then(() => {
+    showToast(`📋 Copied ${label || ''}: ${text}`);
+  }).catch(() => {
+    // Fallback for older browsers / non-https
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(`📋 Copied ${label || ''}: ${text}`);
+  });
+};
+
+// ── Alert system ─────────────────────────────────────────────────────────────
+const ALERT_KEY = 'fzfish-alerts';
+
+function loadAlerts() {
+  try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '[]'); }
+  catch(e) { return []; }
+}
+
+function saveAlerts(alerts) {
+  localStorage.setItem(ALERT_KEY, JSON.stringify(alerts));
+}
+
+function createAlert(type, fish) {
+  const days = type === 'split-id' ? 3 : 7;
+  const alerts = loadAlerts();
+  if (alerts.some(a => !a.dismissed && a.type === type && a.tankInternalId === fish.id)) return;
+  alerts.push({
+    id: 'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    type,
+    tankInternalId: fish.id,
+    tankLine:       fish.line,
+    tankLocation:   fish.location,
+    createdAt:      Date.now(),
+    fireAt:         Date.now() + days * 24 * 60 * 60 * 1000,
+    snoozedUntil:   null,
+    dismissed:      false,
+  });
+  saveAlerts(alerts);
+  renderAlertBadge();
+}
+
+window.dismissAlert = function(id) {
+  const alerts = loadAlerts().map(a => a.id === id ? { ...a, dismissed: true } : a);
+  saveAlerts(alerts);
+  renderAlertBadge();
+  buildAlertPanel();
+};
+
+function dismissAlertsForTank(tankInternalId, type) {
+  const alerts = loadAlerts().map(a =>
+    a.tankInternalId === tankInternalId && (!type || a.type === type)
+      ? { ...a, dismissed: true } : a
+  );
+  saveAlerts(alerts);
+  renderAlertBadge();
+}
+
+window.snoozeAlert = function(id) {
+  const alerts = loadAlerts().map(a =>
+    a.id === id ? { ...a, snoozedUntil: Date.now() + 60 * 60 * 1000 } : a
+  );
+  saveAlerts(alerts);
+  renderAlertBadge();
+  buildAlertPanel();
+};
+
+function getActiveAlerts() {
+  const now = Date.now();
+  return loadAlerts().filter(a =>
+    !a.dismissed && a.fireAt <= now && (!a.snoozedUntil || a.snoozedUntil < now)
+  );
+}
+
+function getUpcomingAlerts() {
+  const now = Date.now();
+  return loadAlerts().filter(a => !a.dismissed && a.fireAt > now);
+}
+
+function renderAlertBadge() {
+  const count = getActiveAlerts().length;
+  ['alert-btn', 'mob-alert-btn'].forEach(btnId => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    let badge = btn.querySelector('.alert-badge');
+    if (count > 0) {
+      if (!badge) { badge = document.createElement('span'); badge.className = 'alert-badge'; btn.appendChild(badge); }
+      badge.textContent = count;
+      btn.classList.add('has-alerts');
+    } else {
+      badge?.remove();
+      btn.classList.remove('has-alerts');
+    }
+  });
+}
+
+function checkAlerts() {
+  renderAlertBadge();
+  const active = getActiveAlerts();
+  if (active.length > 0) {
+    showToast(`🔔 ${active.length} alert${active.length > 1 ? 's' : ''} need attention`);
+  }
+}
+
+function alertMessage(a) {
+  const fish = fishData.find(f => f.id === a.tankInternalId);
+  const line = fish?.line || a.tankLine || '?';
+  const loc  = fish?.location || a.tankLocation || '?';
+  if (a.type === 'split-id') {
+    return `Add Tank ID to split tank: <strong>${esc(line)}</strong> at ${esc(loc)}`;
+  }
+  if (a.type === 'nursery-id') {
+    return `Add Tank ID to nursery tank: <strong>${esc(line)}</strong> at ${esc(loc)}`;
+  }
+  if (a.type === 'baffle-remove') {
+    const tankId = fish?.tankId || '';
+    return `Remove mesh baffles: <strong>${esc(line)}</strong>${tankId ? ` (${esc(tankId)})` : ''} at ${esc(loc)}`;
+  }
+  return esc(a.type);
+}
+
+function formatAlertDate(ts) {
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+window.openAlertPanel = function() {
+  buildAlertPanel();
+  document.getElementById('alert-overlay').classList.add('active');
+  checkScrollLock();
+};
+
+window.closeAlertPanel = function() {
+  document.getElementById('alert-overlay')?.classList.remove('active');
+  checkScrollLock();
+};
+
+function buildAlertPanel() {
+  const body = document.getElementById('alert-panel-body');
+  if (!body) return;
+  const active   = getActiveAlerts();
+  const upcoming = getUpcomingAlerts();
+
+  if (!active.length && !upcoming.length) {
+    body.innerHTML = '<p class="alert-empty">No alerts — all clear!</p>';
+    return;
+  }
+
+  let html = '';
+  if (active.length) {
+    html += '<div class="alert-section-title">Due now</div>';
+    active.forEach(a => {
+      const fish = fishData.find(f => f.id === a.tankInternalId);
+      html += `<div class="alert-item alert-item-due">
+        <div class="alert-item-msg">${alertMessage(a)}</div>
+        <div class="alert-item-actions">
+          ${fish ? `<button class="btn-ghost btn-xs" onclick="closeAlertPanel();openDrawer('${esc(fish.id)}')">Go to tank</button>` : ''}
+          <button class="btn-ghost btn-xs" onclick="snoozeAlert('${esc(a.id)}')">Snooze 1h</button>
+          <button class="btn-ghost btn-xs" onclick="dismissAlert('${esc(a.id)}')">Dismiss</button>
+        </div>
+      </div>`;
+    });
+  }
+  if (upcoming.length) {
+    html += '<div class="alert-section-title">Upcoming</div>';
+    upcoming.forEach(a => {
+      const fish = fishData.find(f => f.id === a.tankInternalId);
+      html += `<div class="alert-item alert-item-upcoming">
+        <div class="alert-item-msg">${alertMessage(a)}</div>
+        <div class="alert-item-meta">Due ${formatAlertDate(a.fireAt)}</div>
+        <div class="alert-item-actions">
+          ${fish ? `<button class="btn-ghost btn-xs" onclick="closeAlertPanel();openDrawer('${esc(fish.id)}')">Go to tank</button>` : ''}
+          <button class="btn-ghost btn-xs" onclick="dismissAlert('${esc(a.id)}')">Dismiss</button>
+        </div>
+      </div>`;
+    });
+  }
+  body.innerHTML = html;
+}
+
 // ── Toast ─────────────────────────────────────────────────────────────────────
 let toastTimer;
 function showToast(msg) {
@@ -2911,6 +3176,6 @@ document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
     closeExperimentsDropdown();
     if (!document.getElementById('tank-picker-overlay')?.classList.contains('hidden')) closeTankPicker();
-    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide();
+    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); closeAlertPanel();
   }
 });

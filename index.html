@@ -75,6 +75,10 @@
             <button type="button" class="btn-scan-inline" onclick="openScannerForForm()" title="Scan barcode">📷</button>
           </div>
           <p class="field-note" id="tank-id-hint" style="display:none">⚠️ Active tanks require a valid Tank ID (C + 8 digits). The ID is on the bottom-left of the Tank ID tag, starting with a C.</p>
+          <div class="split-btn-row">
+            <button type="button" class="split-tag-btn" id="split-tag-btn" onclick="toggleSplitMode()">Split</button>
+            <span class="split-tag-hint hidden" id="split-tag-hint">🔔 Alert in 3 days to add a real barcode</span>
+          </div>
         </div>
         <div class="form-group">
           <label>Line Name *</label>
@@ -192,6 +196,10 @@
         <div class="form-group full-width">
           <label>Notes</label>
           <textarea id="f-notes" rows="2" placeholder="Any ? genes and notes about this tank…"></textarea>
+          <label class="baffle-remind-label">
+            <input type="checkbox" id="f-baffle-remind" />
+            <span>🔔 Remind me to remove mesh baffles in 7 days</span>
+          </label>
         </div>
       </div>
       <div class="modal-actions">
@@ -238,6 +246,7 @@
     <div class="header-right">
       <button class="icon-btn" onclick="openScanner()" title="Scan barcode">📷</button>
       <button class="icon-btn" onclick="syncSheets()" title="Sync" id="sync-btn">⟳</button>
+      <button class="icon-btn alert-btn" id="alert-btn" onclick="openAlertPanel()" title="Alerts">🔔</button>
       <!-- Experiments -->
       <div class="exp-btn-wrap">
         <button class="btn-exp" id="experiments-btn" onclick="toggleExperimentsDropdown()">🧪 ▾</button>
@@ -283,6 +292,7 @@
     <div class="mini-stats-bar" id="mini-stats-bar"></div>
     <button id="mob-img-btn" class="mob-icon-btn" onclick="toggleImgMode()" title="Toggle photos">🖼</button>
     <button id="mob-sel-btn" class="mob-icon-btn" onclick="enterSelectionModeAuto()" title="Select tanks">☑</button>
+    <button id="mob-alert-btn" class="mob-icon-btn" onclick="openAlertPanel()" title="Alerts">🔔</button>
     <button class="filter-toggle-btn" onclick="openMobileFilters()">
       ⚙ Filters<span id="filter-active-count"></span>
     </button>
@@ -644,6 +654,17 @@
       <button class="btn-primary" onclick="saveMigratedLocations()">Save All &amp; Continue</button>
       <button class="btn-secondary" onclick="skipMigration()">Skip for now</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Alert Panel ── -->
+<div id="alert-overlay" class="overlay" onclick="if(event.target===this)closeAlertPanel()">
+  <div class="alert-card">
+    <div class="alert-card-header">
+      <span>🔔 Alerts</span>
+      <button class="close-btn" onclick="closeAlertPanel()">✕</button>
+    </div>
+    <div class="alert-card-body" id="alert-panel-body"></div>
   </div>
 </div>
 
