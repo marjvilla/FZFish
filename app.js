@@ -139,13 +139,14 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   if (localStorage.getItem('fzfish-demo') === 'true') { useDemoMode(); return; }
 
-  // Restore session from sessionStorage if token still valid
-  const storedToken  = sessionStorage.getItem('zb-token');
-  const storedExpiry = parseInt(sessionStorage.getItem('zb-expiry') || '0');
-  if (storedToken && Date.now() < storedExpiry) {
-    accessToken  = storedToken;
-    tokenExpiry  = storedExpiry;
-    currentUser  = sessionStorage.getItem('zb-user') || '';
+  // If we've seen this user before, try a silent token refresh — no sign-in screen needed.
+  // localStorage persists across browser restarts; the token itself may be expired but
+  // requestAccessToken({ prompt: '' }) will silently renew it while Google session is active.
+  const storedUser = localStorage.getItem('zb-user');
+  if (storedUser) {
+    accessToken = localStorage.getItem('zb-token') || null;
+    tokenExpiry  = parseInt(localStorage.getItem('zb-expiry') || '0');
+    currentUser  = storedUser;
     waitForGIS(true);
     return;
   }
@@ -160,9 +161,11 @@ function waitForGIS(autoConnect) {
       initTokenClient();
       if (autoConnect) {
         Promise.all([fetchSheetGid(), fetchFromSheets()]).then(showApp).catch(() => {
-          // Token may have expired silently; clear and show sign-in
+          // Silent refresh failed (Google session expired); clear and show sign-in
           accessToken = null;
-          sessionStorage.clear();
+          localStorage.removeItem('zb-token');
+          localStorage.removeItem('zb-expiry');
+          localStorage.removeItem('zb-user');
         });
       }
     }
@@ -183,8 +186,8 @@ function initTokenClient() {
       }
       accessToken = response.access_token;
       tokenExpiry  = Date.now() + (response.expires_in - 60) * 1000;
-      sessionStorage.setItem('zb-token',  accessToken);
-      sessionStorage.setItem('zb-expiry', String(tokenExpiry));
+      localStorage.setItem('zb-token',  accessToken);
+      localStorage.setItem('zb-expiry', String(tokenExpiry));
       tokenResolvers.forEach(r => r.resolve());
       tokenResolvers = [];
     },
@@ -228,7 +231,9 @@ window.signIn = async function() {
 window.signOut = function() {
   if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
   accessToken = null; tokenExpiry = 0; fishData = []; demoMode = false; currentUser = '';
-  sessionStorage.clear();
+  localStorage.removeItem('zb-token');
+  localStorage.removeItem('zb-expiry');
+  localStorage.removeItem('zb-user');
   localStorage.removeItem('fzfish-demo');
   document.getElementById('app').classList.add('hidden');
   document.getElementById('setup-overlay').classList.add('active');
@@ -260,7 +265,7 @@ async function fetchUserInfo() {
     const res  = await authFetch('https://www.googleapis.com/oauth2/v3/userinfo');
     const json = await res.json();
     currentUser = json.email || json.name || '';
-    sessionStorage.setItem('zb-user', currentUser);
+    localStorage.setItem('zb-user', currentUser);
   } catch(e) { currentUser = ''; }
 }
 
@@ -1354,9 +1359,11 @@ function formatDateTime(d) {
 
 function calcDpf(d) {
   if (!d) return '?';
-  const dt = new Date(d + 'T00:00:00');
-  if (isNaN(dt)) return '?';
-  return Math.floor((Date.now() - dt.getTime()) / 86400000);
+  const fert = new Date(d + 'T00:00:00');
+  if (isNaN(fert)) return '?';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((today - fert) / 86400000);
+  // day 0 = date of fertilization; day 1 = the next calendar day; etc.
 }
 
 function esc(s) {
@@ -1446,7 +1453,8 @@ window.filterFish = function() {
       for (const m of activeUnsortedMarkers) { if (!s.has(m)) return false; }
     }
     if (activeDpfMin !== null || activeDpfMax !== null) {
-      const dpf = f.age ? Math.floor((Date.now() - new Date(f.age + 'T00:00:00')) / 86400000) : null;
+      const _today = new Date(); _today.setHours(0, 0, 0, 0);
+      const dpf = f.age ? Math.round((_today - new Date(f.age + 'T00:00:00')) / 86400000) : null;
       if (dpf === null) return false;
       if (activeDpfMin !== null && dpf < activeDpfMin) return false;
       if (activeDpfMax !== null && dpf > activeDpfMax) return false;
@@ -3027,7 +3035,7 @@ window.copyToClip = function(text, label) {
 // Alerts are stored as a single JSON blob in changelog!Z1 — a far-off cell
 // that changelog append rows (columns A–F) never reach.  No new tab needed.
 const ALERT_KEY      = 'fzfish-alerts';
-const ALERTS_CELL    = 'changelog!Z1';   // reserved cell — do not use for changelog data
+const ALERTS_CELL    = TAB_NAME + '!Z1'; // reserved cell in Fish tab (row 1 col Z, skipped by parser)
 
 // ── Load alerts (sheet when signed in; localStorage in demo) ─────────────────
 async function loadAlerts() {
