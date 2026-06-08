@@ -302,6 +302,23 @@ async function fetchFromSheets() {
     const json = await res.json();
     if (json.error) { showToast('❌ ' + json.error.message); return false; }
     const rows = json.values || [];
+    // Alerts piggyback on this fetch — stored as JSON in Fish!Z1 (col 25 of row 0)
+    try { alertCache = JSON.parse(rows[0]?.[25] || '[]'); } catch(e) { alertCache = []; }
+    // One-time migration: if Fish!Z1 is empty, check changelog!Z1 for alerts written there previously
+    if (!alertCache.length) {
+      try {
+        const mr = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/changelog!Z1`);
+        const mj = await mr.json();
+        const raw = mj.values?.[0]?.[0];
+        if (raw) {
+          alertCache = JSON.parse(raw);
+          await saveAlerts(alertCache);   // write to Fish!Z1
+          // Clear the old cell
+          await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/changelog!Z1:clear`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        }
+      } catch(e) { /* changelog may not exist — fine */ }
+    }
     fishData = rows.slice(1).map((r, i) => ({
       id:          r[COL.tankId]     || `row-${i+2}`,
       tankId:      r[COL.tankId]     || '',
@@ -3035,22 +3052,15 @@ window.copyToClip = function(text, label) {
 // Alerts are stored as a single JSON blob in changelog!Z1 — a far-off cell
 // that changelog append rows (columns A–F) never reach.  No new tab needed.
 const ALERT_KEY      = 'fzfish-alerts';
-const ALERTS_CELL    = TAB_NAME + '!Z1'; // reserved cell in Fish tab (row 1 col Z, skipped by parser)
+const ALERTS_CELL    = TAB_NAME + '!Z1'; // col Z, row 1 — free-rides on the fetchFromSheets response
 
-// ── Load alerts (sheet when signed in; localStorage in demo) ─────────────────
+// ── Load alerts (always from cache — populated by fetchFromSheets; localStorage in demo) ──
 async function loadAlerts() {
   if (demoMode) {
     try { return JSON.parse(localStorage.getItem(ALERT_KEY) || '[]'); }
     catch(e) { return []; }
   }
-  if (alertCache !== null) return alertCache;
-  try {
-    const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(ALERTS_CELL)}`);
-    const json = await res.json();
-    const raw  = json.values?.[0]?.[0] || '[]';
-    alertCache = JSON.parse(raw);
-  } catch(e) { console.warn('loadAlerts:', e.message); alertCache = []; }
-  return alertCache;
+  return alertCache ?? [];
 }
 
 // ── Save alerts (sheet when signed in; localStorage in demo) ─────────────────
