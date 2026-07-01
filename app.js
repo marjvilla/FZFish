@@ -48,6 +48,15 @@ let imgOff            = localStorage.getItem('fzfish-img-off') === 'true';
 let deferredInstallPrompt = null;
 let alertCache            = null;   // null = not loaded; [] or array = loaded from sheet
 
+// ── Breeding / lineage state ──
+let crosses           = [];         // loaded from the Lineage tab
+let lineageTabReady   = false;      // true once we know the Lineage tab exists
+let offspringCrossId  = null;       // set while recording offspring for a cross
+let newCrossParents   = [null, null]; // tankIds being assembled in the New Cross modal
+let newCrossIncross   = false;
+let newCrossPhotos    = [];         // photo URLs uploaded for the setup being created
+let scanForCross      = 0;          // 0 = off, 1 = filling parent 1, 2 = filling parent 2
+
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   deferredInstallPrompt = e;
@@ -88,8 +97,10 @@ const COL = {
   age:        3, count:    4, location:   5,
   markers:    6, status:   7, notes:      8,
   updated:    9, photo:   10, negMarkers: 11,
-  thumbPos:  12,
+  thumbPos:  12, crossOrigin: 13,
 };
+
+const LINEAGE_TAB = 'Lineage';
 
 // ── Demo data ────────────────────────────────────────────────────────────────
 const DEMO = [
@@ -256,6 +267,7 @@ function showApp() {
   if (signoutBtn) signoutBtn.textContent = demoMode ? 'Exit Demo' : 'Sign Out';
   renderAll();
   checkAlerts();   // async — fire-and-forget, badge/toast updates when ready
+  fetchCrosses().then(renderCrossBadge);  // load breeding crosses in the background
   // Migration wizards are intentionally not auto-triggered.
   // Run manually via console if needed: checkLocationMigration() or checkUnsortedMigration()
 }
@@ -334,6 +346,7 @@ async function fetchFromSheets() {
       updated:     r[COL.updated]    || '',
       photoUrl:    normalizePhotoUrl(r[COL.photo] || ''),
       thumbPos:    r[COL.thumbPos]   || '',
+      crossOrigin: r[COL.crossOrigin] || '',
       _rowIndex: i + 2,
     }));
     showToast('✅ Synced ' + fishData.length + ' tanks');
@@ -379,6 +392,7 @@ function recordToRow(r) {
     r.photoUrl    || '',
     (r.negMarkers || []).join(', '),
     r.thumbPos    || '',
+    r.crossOrigin || '',
   ];
 }
 
@@ -388,8 +402,9 @@ window.syncSheets = async function() {
   if (demoMode) { await new Promise(r => setTimeout(r, 600)); btn.classList.remove('spinning'); showToast('🐠 Demo mode — nothing to sync'); return; }
   try {
     alertCache = null;   // invalidate so next openAlertPanel re-fetches from sheet
-    await fetchFromSheets(); await fetchExperiments(); renderAll();
+    await fetchFromSheets(); await fetchExperiments(); await fetchCrosses(); renderAll();
     checkAlerts();
+    renderCrossBadge();
   } catch(e) {
     showToast('⚠️ Sync failed — check your connection');
     console.warn('syncSheets error:', e);
@@ -404,7 +419,7 @@ async function fetchExperiments() {
   try {
     const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties`);
     const json = await res.json();
-    const reserved = new Set([TAB_NAME.toLowerCase(), 'changelog']);
+    const reserved = new Set([TAB_NAME.toLowerCase(), 'changelog', LINEAGE_TAB.toLowerCase()]);
     const expSheets = (json.sheets || []).map(s => s.properties).filter(p => !reserved.has(p.title.toLowerCase()));
     // Only store names/gids — tank IDs are loaded lazily when an experiment is opened
     experiments = expSheets.map(p => ({ name: p.title, gid: p.sheetId, tankIds: null, tankGroups: null }));
@@ -2339,6 +2354,9 @@ window.openAddModal = function() {
   editingId = null; currentMarkers = []; currentNegMarkers = []; currentUnsortedMarkers = [];
   currentPhotoUrl = null; originalPhotoUrl = null; pendingPhotoFile = null;
   currentThumbPos = '50% 15%';
+  offspringCrossId = null;
+  document.getElementById('save-add-another-btn')?.classList.add('hidden');
+  document.getElementById('offspring-cross-note')?.classList.add('hidden');
   document.getElementById('modal-title').textContent = 'Add Tank';
   document.getElementById('fish-form').reset();
   document.getElementById('f-tank-id').value             = '';
@@ -2424,6 +2442,9 @@ window.duplicateFish = function(id) {
 
 window.closeModal = function() {
   document.getElementById('fish-modal').classList.remove('active');
+  offspringCrossId = null;
+  document.getElementById('save-add-another-btn')?.classList.add('hidden');
+  document.getElementById('offspring-cross-note')?.classList.add('hidden');
   document.getElementById('pos-picker-dropdown')?.classList.add('hidden');
   document.getElementById('neg-picker-dropdown')?.classList.add('hidden');
   document.getElementById('unsorted-picker-dropdown')?.classList.add('hidden');
@@ -2502,7 +2523,9 @@ window.removePhoto = function() {
   currentPhotoUrl = null; pendingPhotoFile = null; resetPhotoUI();
 };
 
-window.saveFish = async function(e) {
+window.saveFishAddAnother = function() { return saveFish({ preventDefault(){} }, true); };
+
+window.saveFish = async function(e, addAnother) {
   e.preventDefault();
   const saveBtn = document.getElementById('save-btn');
 
@@ -2553,6 +2576,7 @@ window.saveFish = async function(e) {
     status:     document.querySelector('input[name="status"]:checked')?.value || 'Active',
     notes:      document.getElementById('f-notes').value.trim(),
     photoUrl, thumbPos: currentThumbPos,
+    crossOrigin: offspringCrossId || (editingId ? (fishData.find(x => x.id === editingId)?.crossOrigin || '') : ''),
     updated: new Date().toISOString().slice(0, 16).replace('T', ' '),
   };
   record.id = record.tankId;
@@ -2613,7 +2637,19 @@ window.saveFish = async function(e) {
     await dismissAlertsForTank(editingId, 'nursery-id');
   }
 
+  // Offspring recording: link this tank back to its cross and mark it complete
+  if (offspringCrossId && !editingId) {
+    await attachOffspringToCross(offspringCrossId, record.tankId);
+    if (addAnother) {
+      invalidateMarkerFreq();
+      renderAll();
+      prepNextOffspring();   // keep modal open, ready for the next tank
+      return;
+    }
+  }
+
   invalidateMarkerFreq();
+  offspringCrossId = null;
   closeModal(); renderAll();
 };
 
@@ -2893,6 +2929,7 @@ window.openDrawer = function(id) {
       <div style="display:flex;flex-wrap:wrap;gap:.35rem;padding:.5rem 0">${unsortedHtml}</div>
     </div>
     ${f.notes ? `<div class="drawer-section"><h4>Notes</h4><p style="font-size:.88rem;color:var(--text-muted);line-height:1.5">${esc(f.notes)}</p></div>` : ''}
+    ${buildLineageHtml(f)}
     ${experiments.length ? `
     <div class="drawer-section">
       <h4>🧪 Experiments</h4>
@@ -2978,6 +3015,7 @@ window.filterGuide = function(q) {
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
 window.openScanner = function() {
   scanForForm = false;
+  scanForCross = 0;
   document.getElementById('scan-overlay').classList.add('active');
   document.getElementById('scan-status').textContent = 'Initializing camera…';
   document.getElementById('manual-barcode').value    = '';
@@ -2993,6 +3031,7 @@ window.openScannerForForm = function() {
 window.closeScanner = function() {
   document.getElementById('scan-overlay').classList.remove('active');
   scanForForm = false;
+  scanForCross = 0;
   stopQuagga(); checkScrollLock();
 };
 // Named handler so Quagga.offDetected can remove the exact same reference —
@@ -3008,6 +3047,11 @@ function handleBarcodeDetected(result) {
   document.getElementById('scan-overlay').classList.remove('active');
   checkScrollLock();
   showToast(`📷 Scanned: ${code.toUpperCase()}`);
+  if (scanForCross) {
+    const slot = scanForCross; scanForCross = 0;
+    setCrossParentByScan(slot, code.toUpperCase());
+    return;
+  }
   if (scanForForm) {
     scanForForm = false;
     const upper = code.toUpperCase();
@@ -3060,6 +3104,13 @@ function stopQuagga() {
 window.manualBarcode = function() {
   const v = document.getElementById('manual-barcode').value.trim().toUpperCase();
   if (!v) return;
+  // Picking a breeding parent — accept any existing tank ID (parents may be SPL-* tanks)
+  if (scanForCross) {
+    const slot = scanForCross;
+    closeScanner();
+    setCrossParentByScan(slot, v);
+    return;
+  }
   if (!/^C\d{8}$/.test(v)) {
     document.getElementById('manual-barcode').focus();
     showToast(`⚠️ Must be C + 8 digits (e.g. C12345678)`);
@@ -3224,6 +3275,9 @@ function alertMessage(a) {
     const tankId = fish?.tankId || '';
     return `Remove mesh baffles: <strong>${esc(line)}</strong>${tankId ? ` (${esc(tankId)})` : ''} at ${esc(loc)}`;
   }
+  if (a.type === 'breeding-followup') {
+    return `Record offspring for cross: <strong>${esc(a.tankLine || '?')}</strong>`;
+  }
   return esc(a.type);
 }
 
@@ -3302,10 +3356,13 @@ async function buildAlertPanel() {
     html += '<div class="alert-section-title">Due now</div>';
     active.forEach(a => {
       const fish = fishData.find(f => f.id === a.tankInternalId);
+      const action = a.type === 'breeding-followup'
+        ? `<button class="btn-ghost btn-xs" onclick="recordOffspring('${esc(a.crossId)}')">Record offspring</button>`
+        : (fish ? `<button class="btn-ghost btn-xs" onclick="closeAlertPanel();openDrawer('${esc(fish.id)}')">Go to tank</button>` : '');
       html += `<div class="alert-item alert-item-due">
         <div class="alert-item-msg">${alertMessage(a)}</div>
         <div class="alert-item-actions">
-          ${fish ? `<button class="btn-ghost btn-xs" onclick="closeAlertPanel();openDrawer('${esc(fish.id)}')">Go to tank</button>` : ''}
+          ${action}
           <button class="btn-ghost btn-xs" onclick="snoozeAlert('${esc(a.id)}')">Snooze 1h</button>
           <button class="btn-ghost btn-xs" onclick="dismissAlert('${esc(a.id)}')">Dismiss</button>
         </div>
@@ -3316,11 +3373,14 @@ async function buildAlertPanel() {
     html += '<div class="alert-section-title">Upcoming</div>';
     upcoming.forEach(a => {
       const fish = fishData.find(f => f.id === a.tankInternalId);
+      const action = a.type === 'breeding-followup'
+        ? `<button class="btn-ghost btn-xs" onclick="recordOffspring('${esc(a.crossId)}')">Record offspring</button>`
+        : (fish ? `<button class="btn-ghost btn-xs" onclick="closeAlertPanel();openDrawer('${esc(fish.id)}')">Go to tank</button>` : '');
       html += `<div class="alert-item alert-item-upcoming">
         <div class="alert-item-msg">${alertMessage(a)}</div>
         <div class="alert-item-meta">Due ${formatAlertDate(a.fireAt)}</div>
         <div class="alert-item-actions">
-          ${fish ? `<button class="btn-ghost btn-xs" onclick="closeAlertPanel();openDrawer('${esc(fish.id)}')">Go to tank</button>` : ''}
+          ${action}
           <button class="btn-ghost btn-xs" onclick="dismissAlert('${esc(a.id)}')">Dismiss</button>
         </div>
       </div>`;
@@ -3328,6 +3388,698 @@ async function buildAlertPanel() {
   }
   body.innerHTML = html;
 }
+
+// ── Breeding / Lineage ───────────────────────────────────────────────────────
+// Crosses live in their own "Lineage" tab. Each row is one breeding setup:
+// A Cross ID | B Date | C Parent1 | D Parent2 | E Incross | F Follow-up days
+// G Status | H Photos(JSON) | I Photo expires | J Notes | K Offspring IDs
+const CROSS_KEY = 'fzfish-crosses';   // demo-mode localStorage key
+
+function findTank(tankId) {
+  if (!tankId) return null;
+  return fishData.find(f => (f.tankId || '') === tankId) || null;
+}
+
+function addDays(dateStr, n) {
+  const base = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  if (isNaN(base)) return '';
+  base.setDate(base.getDate() + n);
+  return base.toISOString().slice(0, 10);
+}
+
+function crossLabelFromIds(id1, id2, incross) {
+  const l1 = findTank(id1)?.line || id1 || '?';
+  if (incross) return `${l1} inx.`;
+  const l2 = findTank(id2)?.line || id2 || '?';
+  return `${l1} × ${l2}`;
+}
+function crossLabel(c) {
+  return crossLabelFromIds(c.parent1, c.incross ? c.parent1 : c.parent2, c.incross);
+}
+
+function rowToCross(r, i) {
+  let photos = [];
+  try { photos = JSON.parse(r[7] || '[]'); } catch(e) { photos = []; }
+  return {
+    id:           r[0] || '',
+    date:         r[1] || '',
+    parent1:      r[2] || '',
+    parent2:      r[3] || '',
+    incross:      String(r[4] || '').toLowerCase() === 'yes',
+    followupDays: parseInt(r[5]) || 7,
+    status:       r[6] || 'active',
+    photos,
+    photoExpires: r[8] || '',
+    notes:        r[9] || '',
+    offspring:    parseList(r[10]),
+    _rowIndex:    i + 2,
+  };
+}
+function crossToRow(c) {
+  return [
+    c.id, c.date, c.parent1, c.parent2 || '',
+    c.incross ? 'yes' : '',
+    String(c.followupDays || 7),
+    c.status || 'active',
+    JSON.stringify(c.photos || []),
+    c.photoExpires || '',
+    c.notes || '',
+    (c.offspring || []).join(', '),
+  ];
+}
+
+async function ensureLineageTab() {
+  if (lineageTabReady || demoMode) return;
+  const res  = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties`);
+  const json = await res.json();
+  const exists = (json.sheets || []).some(s => s.properties.title.toLowerCase() === LINEAGE_TAB.toLowerCase());
+  if (!exists) {
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: LINEAGE_TAB } } }] }),
+    });
+    await authFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(LINEAGE_TAB)}!A1?valueInputOption=RAW`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [['Cross ID','Date','Parent 1','Parent 2','Incross','Follow-up Days','Status','Photos','Photo Expires','Notes','Offspring']] }) }
+    );
+  }
+  lineageTabReady = true;
+}
+
+async function fetchCrosses() {
+  if (demoMode) {
+    try { crosses = JSON.parse(localStorage.getItem(CROSS_KEY) || '[]'); }
+    catch(e) { crosses = []; }
+    return;
+  }
+  try {
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(LINEAGE_TAB)}!A2:K`);
+    const d = await r.json();
+    if (d.error) { crosses = []; return; }   // tab likely doesn't exist yet
+    lineageTabReady = true;
+    crosses = (d.values || []).map((row, i) => rowToCross(row, i)).filter(c => c.id);
+    await cleanupExpiredCrossPhotos();
+  } catch(e) { crosses = []; }
+}
+
+async function saveCross(c) {
+  const idx = crosses.findIndex(x => x.id === c.id);
+  if (idx >= 0) crosses[idx] = c; else crosses.push(c);
+  if (demoMode) {
+    localStorage.setItem(CROSS_KEY, JSON.stringify(crosses.map(({ _rowIndex, ...rest }) => rest)));
+    return;
+  }
+  await ensureLineageTab();
+  if (c._rowIndex) {
+    await authFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(LINEAGE_TAB + '!A' + c._rowIndex)}?valueInputOption=RAW`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [crossToRow(c)] }) }
+    );
+  } else {
+    const res = await authFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(LINEAGE_TAB)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [crossToRow(c)] }) }
+    );
+    const json = await res.json();
+    const m = json.updates?.updatedRange?.match(/(\d+)$/);
+    c._rowIndex = m ? parseInt(m[1]) : null;
+  }
+}
+
+async function cleanupExpiredCrossPhotos() {
+  if (demoMode) return;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  for (const c of crosses) {
+    if (c.photos?.length && c.photoExpires) {
+      const exp = new Date(c.photoExpires + 'T00:00:00');
+      if (!isNaN(exp) && exp < today) {
+        for (const url of c.photos) { await deleteDrivePhoto(url); }
+        c.photos = []; c.photoExpires = '';
+        try { await saveCross(c); } catch(e) {}
+      }
+    }
+  }
+}
+
+// ── Cross badge (count of crosses due for follow-up) ─────────────────────────
+function activeCrosses()   { return crosses.filter(c => c.status === 'active'); }
+function crossesDueCount() {
+  const now = Date.now();
+  return activeCrosses().filter(c => {
+    const due = new Date(c.date + 'T00:00:00').getTime() + (c.followupDays || 7) * 86400000;
+    return due <= now;
+  }).length;
+}
+function renderCrossBadge() {
+  const due = crossesDueCount();
+  ['crosses-btn', 'mob-crosses-btn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    let badge = btn.querySelector('.alert-badge');
+    if (due > 0) {
+      if (!badge) { badge = document.createElement('span'); badge.className = 'alert-badge'; btn.appendChild(badge); }
+      badge.textContent = due;
+      btn.classList.add('has-alerts');
+    } else { badge?.remove(); btn.classList.remove('has-alerts'); }
+  });
+}
+
+// ── Breeding follow-up alert ──────────────────────────────────────────────────
+async function createBreedingAlert(cross) {
+  const alerts = await loadAlerts();
+  if (alerts.some(a => !a.dismissed && a.type === 'breeding-followup' && a.crossId === cross.id)) return;
+  alerts.push({
+    id:           'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    type:         'breeding-followup',
+    crossId:      cross.id,
+    tankLine:     crossLabel(cross),
+    createdAt:    Date.now(),
+    fireAt:       new Date(cross.date + 'T00:00:00').getTime() + (cross.followupDays || 7) * 86400000,
+    snoozedUntil: null,
+    dismissed:    false,
+    createdBy:    currentUser || '',
+  });
+  await saveAlerts(alerts);
+  renderAlertBadge();
+}
+async function dismissBreedingAlert(crossId) {
+  const alerts = (await loadAlerts()).map(a =>
+    a.type === 'breeding-followup' && a.crossId === crossId ? { ...a, dismissed: true } : a
+  );
+  await saveAlerts(alerts);
+  renderAlertBadge();
+}
+
+// ── Crosses panel ─────────────────────────────────────────────────────────────
+window.openCrossesPanel = function() {
+  document.getElementById('crosses-overlay').classList.add('active');
+  checkScrollLock();
+  buildCrossesPanel();
+};
+window.closeCrossesPanel = function() {
+  document.getElementById('crosses-overlay')?.classList.remove('active');
+  checkScrollLock();
+};
+
+function crossCardHtml(c) {
+  const setup   = formatDate(c.date);
+  const dueTs   = new Date(c.date + 'T00:00:00').getTime() + (c.followupDays || 7) * 86400000;
+  const days    = Math.ceil((dueTs - Date.now()) / 86400000);
+  const dueTxt  = c.status !== 'active' ? '' :
+    days > 0 ? `Follow-up in ${days} day${days !== 1 ? 's' : ''}`
+             : `<span class="cross-due">Follow-up due</span>`;
+  const p1 = findTank(c.parent1), p2 = findTank(c.parent2);
+  const parentChips = `
+    <span class="cross-parent-chip" onclick="closeCrossesPanel();openDrawer('${esc(c.parent1)}')">${esc(p1?.line || c.parent1)}</span>
+    ${c.incross ? '<span class="cross-x">incross</span>' :
+      `<span class="cross-x">×</span><span class="cross-parent-chip" onclick="closeCrossesPanel();openDrawer('${esc(c.parent2)}')">${esc(p2?.line || c.parent2)}</span>`}`;
+  const photos = (c.photos || []).map(u => `<img class="cross-photo-thumb-img" src="${esc(u)}" onclick="openLightbox('${esc(u)}')">`).join('');
+  const offspring = (c.offspring || []).length
+    ? `<div class="cross-offspring">Offspring: ${c.offspring.map(id => `<span class="cross-parent-chip" onclick="closeCrossesPanel();openDrawer('${esc(id)}')">${esc(findTank(id)?.line || id)}</span>`).join(' ')}</div>`
+    : '';
+  return `<div class="cross-card cross-card-${c.status}">
+    <div class="cross-card-top">
+      <div class="cross-card-label">${esc(crossLabel(c))}</div>
+      ${c.status === 'active' ? `<span class="cross-badge-days">${dueTxt}</span>` : `<span class="cross-status-tag">${esc(c.status)}</span>`}
+    </div>
+    <div class="cross-card-parents">${parentChips}</div>
+    <div class="cross-card-meta">Set up ${setup}</div>
+    ${c.notes ? `<div class="cross-card-notes">${esc(c.notes)}</div>` : ''}
+    ${photos ? `<div class="cross-photo-row">${photos}</div>` : ''}
+    ${offspring}
+    ${c.status === 'active' ? `<div class="cross-card-actions">
+      <button class="btn-xs btn-primary" onclick="recordOffspring('${esc(c.id)}')">Record offspring</button>
+      <button class="btn-xs btn-ghost" onclick="openEditCross('${esc(c.id)}')">Edit</button>
+      <label class="btn-xs btn-ghost cross-addphoto-btn">📷 Photo<input type="file" accept="image/*" multiple hidden onchange="addCrossPhotos('${esc(c.id)}', this)"></label>
+      <button class="btn-xs btn-ghost" onclick="completeCross('${esc(c.id)}')">Mark done</button>
+      <button class="btn-xs btn-ghost danger-ghost" onclick="cancelCross('${esc(c.id)}')">Cancel</button>
+    </div>` : `<div class="cross-card-actions">
+      <button class="btn-xs btn-ghost" onclick="openEditCross('${esc(c.id)}')">Edit</button>
+    </div>`}
+  </div>`;
+}
+
+function buildCrossesPanel() {
+  const body = document.getElementById('crosses-panel-body');
+  if (!body) return;
+  const active = crosses.filter(c => c.status === 'active')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const past = crosses.filter(c => c.status !== 'active')
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  let html = `<button class="btn-primary btn-sm cross-new-btn" onclick="openNewCross()">＋ New Cross</button>`;
+  if (!active.length && !past.length) {
+    html += `<p class="alert-empty">No crosses yet. Set one up to start tracking breeding.</p>`;
+  }
+  if (active.length) {
+    html += `<div class="alert-section-title">Active breeding</div>`;
+    html += active.map(crossCardHtml).join('');
+  }
+  if (past.length) {
+    html += `<details class="cross-past"><summary>Past crosses (${past.length})</summary>`;
+    html += past.map(crossCardHtml).join('');
+    html += `</details>`;
+  }
+  body.innerHTML = html;
+}
+
+// ── New Cross modal ───────────────────────────────────────────────────────────
+let crossChoosingSlot  = 0;
+let editingCrossId     = null;   // null = creating; id = editing an existing cross
+let removedCrossPhotos = [];      // existing photo URLs to delete from Drive on save
+
+function setCrossModalMode(editing) {
+  const title = document.querySelector('#new-cross-overlay h2');
+  const btn   = document.getElementById('new-cross-save');
+  if (title) title.textContent = editing ? 'Edit Cross' : 'New Cross';
+  if (btn)   btn.textContent   = editing ? 'Save changes' : 'Set up cross';
+}
+
+window.openNewCross = function(prefillParent1) {
+  editingCrossId     = null;
+  newCrossParents    = [prefillParent1 || null, null];
+  newCrossIncross    = false;
+  newCrossPhotos     = [];
+  removedCrossPhotos = [];
+  crossChoosingSlot  = 0;
+  closeCrossesPanel();
+  setCrossModalMode(false);
+  document.getElementById('new-cross-overlay').classList.add('active');
+  checkScrollLock();
+  renderNewCrossModal();
+};
+
+window.openEditCross = function(crossId) {
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  editingCrossId     = crossId;
+  newCrossParents    = [c.parent1 || null, c.incross ? null : (c.parent2 || null)];
+  newCrossIncross    = c.incross;
+  newCrossPhotos     = (c.photos || []).map(url => ({ url, existing: true }));
+  removedCrossPhotos = [];
+  crossChoosingSlot  = 0;
+  closeCrossesPanel();
+  setCrossModalMode(true);
+  document.getElementById('new-cross-overlay').classList.add('active');
+  checkScrollLock();
+  renderNewCrossModal();
+  document.getElementById('new-cross-days').value  = c.followupDays || 7;
+  document.getElementById('new-cross-notes').value = c.notes || '';
+};
+window.closeNewCross = function() {
+  document.getElementById('new-cross-overlay')?.classList.remove('active');
+  newCrossPhotos     = [];
+  removedCrossPhotos = [];
+  editingCrossId     = null;
+  checkScrollLock();
+};
+
+function crossParentSlotHtml(slot) {
+  if (slot === 2 && newCrossIncross) return '';
+  const tankId = newCrossParents[slot - 1];
+  const tank   = tankId ? findTank(tankId) : null;
+  let inner;
+  if (tankId) {
+    inner = `<div class="cross-parent-card">
+      <div class="cross-parent-info">
+        <div class="cross-parent-line">${esc(tank?.line || tankId)}</div>
+        <div class="cross-parent-id">${esc(tankId)}${tank?.location ? ' · 📍 ' + esc(tank.location) : ''}</div>
+      </div>
+      <button type="button" class="btn-xs btn-ghost" onclick="clearCrossParent(${slot})">✕</button>
+    </div>`;
+  } else {
+    inner = `<div class="cross-parent-empty">
+      <button type="button" class="btn-sm btn-ghost" onclick="openScannerForCross(${slot})">📷 Scan</button>
+      <button type="button" class="btn-sm btn-ghost" onclick="chooseCrossParent(${slot})">📋 Choose</button>
+    </div>`;
+    if (crossChoosingSlot === slot) {
+      inner += `<div class="cross-chooser">
+        <input type="text" class="cross-chooser-search" id="cross-chooser-search" placeholder="Search tanks…" oninput="filterCrossChooser(${slot}, this.value)" autocomplete="off" />
+        <div class="cross-chooser-list" id="cross-chooser-list"></div>
+      </div>`;
+    }
+  }
+  return `<div class="cross-parent-slot"><label>Parent ${slot}</label>${inner}</div>`;
+}
+
+function renderNewCrossModal() {
+  const body = document.getElementById('new-cross-body');
+  if (!body) return;
+  const prevDays  = document.getElementById('new-cross-days')?.value;
+  const prevNotes = document.getElementById('new-cross-notes')?.value;
+  const photos = newCrossPhotos.map((p, i) =>
+    `<div class="cross-photo-thumb"><img src="${p.url}"><button type="button" class="cross-photo-del" onclick="removeNewCrossPhoto(${i})">✕</button></div>`
+  ).join('');
+  const p1 = newCrossParents[0];
+  const p2 = newCrossIncross ? newCrossParents[0] : newCrossParents[1];
+  const ready = p1 && (newCrossIncross || p2);
+  body.innerHTML = `
+    ${crossParentSlotHtml(1)}
+    <label class="cross-incross-toggle">
+      <input type="checkbox" ${newCrossIncross ? 'checked' : ''} onchange="toggleNewCrossIncross(this.checked)">
+      <span>Incross (same line / sibling cross — single parent)</span>
+    </label>
+    ${crossParentSlotHtml(2)}
+    <div class="cross-field">
+      <label>Follow-up reminder (days)</label>
+      <input type="number" id="new-cross-days" min="1" value="7" class="cross-num-input">
+    </div>
+    <div class="cross-field">
+      <label>Setup photos <span class="field-note">auto-removed after 3 days</span></label>
+      <div class="cross-photo-grid">
+        ${photos}
+        <label class="cross-photo-add">＋<input type="file" accept="image/*" multiple hidden onchange="addNewCrossPhotos(this)"></label>
+      </div>
+    </div>
+    <div class="cross-field">
+      <label>Notes</label>
+      <textarea id="new-cross-notes" rows="2" placeholder="Cross details for the day…"></textarea>
+    </div>
+    <div class="cross-preview-label">${ready ? 'Will create: <strong>' + esc(crossLabelFromIds(p1, p2, newCrossIncross)) + '</strong>' : 'Pick parents to begin'}</div>
+  `;
+  if (prevDays  != null) document.getElementById('new-cross-days').value  = prevDays;
+  if (prevNotes != null) document.getElementById('new-cross-notes').value = prevNotes;
+  const saveBtn = document.getElementById('new-cross-save');
+  if (saveBtn) saveBtn.disabled = !ready;
+  if (crossChoosingSlot) {
+    filterCrossChooser(crossChoosingSlot, '');
+    setTimeout(() => document.getElementById('cross-chooser-search')?.focus(), 30);
+  }
+}
+
+window.chooseCrossParent = function(slot) {
+  crossChoosingSlot = crossChoosingSlot === slot ? 0 : slot;
+  renderNewCrossModal();
+};
+window.filterCrossChooser = function(slot, q) {
+  const list = document.getElementById('cross-chooser-list');
+  if (!list) return;
+  const term  = (q || '').toLowerCase();
+  const other = newCrossParents[slot === 1 ? 1 : 0];
+  let tanks = fishData.filter(f => f.tankId && f.tankId !== other);
+  if (term) tanks = tanks.filter(f =>
+    f.line.toLowerCase().includes(term) ||
+    (f.tankId || '').toLowerCase().includes(term) ||
+    (f.location || '').toLowerCase().includes(term));
+  tanks = tanks.slice(0, 40);
+  list.innerHTML = tanks.length
+    ? tanks.map(f => `<button type="button" class="cross-chooser-item" onclick="setCrossParent(${slot},'${esc(f.tankId)}')">
+        <span class="cross-chooser-line">${esc(f.line)}</span>
+        <span class="cross-chooser-meta">${esc(f.tankId)}${f.location ? ' · ' + esc(f.location) : ''} · ${esc(f.status)}</span>
+      </button>`).join('')
+    : '<p class="picker-empty">No tanks found.</p>';
+};
+window.setCrossParent = function(slot, tankId) {
+  newCrossParents[slot - 1] = tankId;
+  crossChoosingSlot = 0;
+  renderNewCrossModal();
+};
+window.clearCrossParent = function(slot) {
+  newCrossParents[slot - 1] = null;
+  renderNewCrossModal();
+};
+window.toggleNewCrossIncross = function(on) {
+  newCrossIncross = on;
+  if (on) newCrossParents[1] = null;
+  crossChoosingSlot = 0;
+  renderNewCrossModal();
+};
+
+window.openScannerForCross = function(slot) {
+  scanForCross = slot;
+  document.getElementById('scan-overlay').classList.add('active');
+  document.getElementById('scan-status').textContent = 'Initializing camera…';
+  document.getElementById('manual-barcode').value    = '';
+  checkScrollLock(); startQuagga();
+};
+function setCrossParentByScan(slot, code) {
+  const tank = fishData.find(f => (f.tankId || '').toUpperCase() === code.toUpperCase());
+  if (!tank) { showToast(`⚠️ ${code} not found in inventory`); return; }
+  newCrossParents[slot - 1] = tank.tankId;
+  showToast(`✓ Parent ${slot}: ${tank.line}`);
+  renderNewCrossModal();
+}
+
+window.addNewCrossPhotos = function(input) {
+  [...(input.files || [])].forEach(file => {
+    newCrossPhotos.push({ file, url: URL.createObjectURL(file) });
+  });
+  input.value = '';
+  renderNewCrossModal();
+};
+window.removeNewCrossPhoto = function(i) {
+  const p = newCrossPhotos[i];
+  if (p?.existing) removedCrossPhotos.push(p.url);
+  else if (p?.url) URL.revokeObjectURL(p.url);
+  newCrossPhotos.splice(i, 1);
+  renderNewCrossModal();
+};
+
+window.saveNewCross = async function() {
+  const p1 = newCrossParents[0];
+  const p2 = newCrossIncross ? p1 : newCrossParents[1];
+  if (!p1 || (!newCrossIncross && !p2)) { showToast('⚠️ Pick both parents first'); return; }
+  const btn      = document.getElementById('new-cross-save');
+  const origText = btn?.textContent || (editingCrossId ? 'Save changes' : 'Set up cross');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const days  = parseInt(document.getElementById('new-cross-days')?.value) || 7;
+  const notes = document.getElementById('new-cross-notes')?.value.trim() || '';
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Delete any existing photos the user removed
+  for (const url of removedCrossPhotos) { await deleteDrivePhoto(url); }
+  removedCrossPhotos = [];
+
+  // Keep already-uploaded photos; upload the newly-added pending ones
+  const kept    = newCrossPhotos.filter(p => p.existing).map(p => p.url);
+  const pending = newCrossPhotos.filter(p => p.file);
+  let uploaded  = [];
+  if (pending.length) {
+    if (demoMode) {
+      uploaded = pending.map(p => p.url);
+    } else {
+      try {
+        showToast('📤 Uploading photos…');
+        for (const p of pending) { uploaded.push(await uploadPhoto(p.file)); }
+      } catch(e) { showToast('❌ Photo upload failed'); }
+    }
+  }
+  const photos = [...kept, ...uploaded];
+
+  // ── Edit path ──
+  if (editingCrossId) {
+    const c = crosses.find(x => x.id === editingCrossId);
+    if (!c) { closeNewCross(); return; }
+    c.parent1      = p1;
+    c.parent2      = newCrossIncross ? '' : p2;
+    c.incross      = newCrossIncross;
+    c.followupDays = days;
+    c.notes        = notes;
+    c.photos       = photos;
+    c.photoExpires = photos.length ? (c.photoExpires || addDays(c.date, 3)) : '';
+    try { await saveCross(c); }
+    catch(e) { showToast('❌ ' + e.message); if (btn) { btn.disabled = false; btn.textContent = origText; } return; }
+    // Refresh the follow-up alert since label/timing may have changed
+    if (c.status === 'active') {
+      await dismissBreedingAlert(c.id);
+      await createBreedingAlert(c);
+      await setParentsBreeding([p1, ...(newCrossIncross ? [] : [p2])]);
+    }
+    editingCrossId = null;
+    newCrossPhotos = [];
+    closeNewCross();
+    renderCrossBadge();
+    renderAll();
+    openCrossesPanel();
+    showToast(`✅ Cross updated: ${crossLabel(c)}`);
+    return;
+  }
+
+  // ── Create path ──
+  const cross = {
+    id: 'CROSS-' + Date.now(),
+    date: today,
+    parent1: p1,
+    parent2: newCrossIncross ? '' : p2,
+    incross: newCrossIncross,
+    followupDays: days,
+    status: 'active',
+    photos,
+    photoExpires: photos.length ? addDays(today, 3) : '',
+    notes,
+    offspring: [],
+    _rowIndex: null,
+  };
+  try {
+    await saveCross(cross);
+    await createBreedingAlert(cross);
+  } catch(e) { showToast('❌ ' + e.message); if (btn) { btn.disabled = false; btn.textContent = origText; } return; }
+
+  // Mark both parents as Breeding so they show in the Breeding section
+  await setParentsBreeding([p1, ...(newCrossIncross ? [] : [p2])]);
+
+  newCrossPhotos = [];
+  if (btn) btn.textContent = origText;
+  closeNewCross();
+  renderCrossBadge();
+  renderAll();
+  showToast(`✅ Cross set up: ${crossLabel(cross)}`);
+};
+
+async function setParentsBreeding(ids) {
+  for (const id of ids) {
+    const f = fishData.find(x => x.tankId === id);
+    if (!f || f.status === 'Breeding') continue;
+    f.status = 'Breeding';
+    f.updated = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    if (!demoMode && f._rowIndex) {
+      try { await updateSheetRow(f, f._rowIndex); logChange('Edited', f, 'Status: → Breeding (cross setup)'); } catch(e) {}
+    }
+  }
+}
+
+window.completeCross = async function(crossId) {
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  c.status = 'completed';
+  await saveCross(c);
+  await dismissBreedingAlert(crossId);
+  renderCrossBadge();
+  buildCrossesPanel();
+};
+window.cancelCross = async function(crossId) {
+  if (!confirm('Cancel this cross? It will move to past crosses.')) return;
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  c.status = 'cancelled';
+  for (const url of (c.photos || [])) { await deleteDrivePhoto(url); }
+  c.photos = []; c.photoExpires = '';
+  await saveCross(c);
+  await dismissBreedingAlert(crossId);
+  renderCrossBadge();
+  buildCrossesPanel();
+};
+
+window.addCrossPhotos = async function(crossId, input) {
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  const files = [...(input.files || [])];
+  input.value = '';
+  if (!files.length) return;
+  showToast('📤 Uploading…');
+  try {
+    for (const file of files) {
+      const url = demoMode ? URL.createObjectURL(file) : await uploadPhoto(file);
+      c.photos = [...(c.photos || []), url];
+    }
+    if (!c.photoExpires) c.photoExpires = addDays(c.date, 3);
+    await saveCross(c);
+    buildCrossesPanel();
+    showToast('✅ Photo added');
+  } catch(e) { showToast('❌ Upload failed'); }
+};
+
+// ── Record offspring ──────────────────────────────────────────────────────────
+window.recordOffspring = function(crossId) {
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  closeCrossesPanel();
+  closeAlertPanel();
+  openAddModal();
+  offspringCrossId = crossId;
+  document.getElementById('modal-title').textContent = 'Record Offspring';
+  document.getElementById('f-line').value = crossLabel(c);
+  const parentTxt = c.incross ? `${c.parent1} (incross)` : `${c.parent1} × ${c.parent2}`;
+  document.getElementById('f-notes').value = `Offspring of ${parentTxt}`;
+  const inc = document.querySelector('input[name="status"][value="Incubator"]');
+  if (inc) { inc.checked = true; syncStatusToLoc?.(); }
+  document.getElementById('save-add-another-btn')?.classList.remove('hidden');
+  const note = document.getElementById('offspring-cross-note');
+  if (note) { note.textContent = `🧬 Linking to cross: ${crossLabel(c)}`; note.classList.remove('hidden'); }
+};
+
+function prepNextOffspring() {
+  // Keep line/notes/status/cross context; clear the per-tank fields
+  document.getElementById('f-tank-id').value = '';
+  document.getElementById('f-count').value   = '';
+  currentMarkers = []; currentNegMarkers = []; currentUnsortedMarkers = [];
+  renderMarkerTags(); renderNegMarkerTags(); renderUnsortedMarkerTags();
+  currentPhotoUrl = null; pendingPhotoFile = null;
+  resetPhotoUI();
+  showToast('✅ Saved — add the next tank');
+  document.getElementById('f-tank-id').focus();
+}
+
+async function attachOffspringToCross(crossId, tankId) {
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  if (!(c.offspring || []).includes(tankId)) c.offspring = [...(c.offspring || []), tankId];
+  c.status = 'completed';
+  await saveCross(c);
+  await dismissBreedingAlert(crossId);
+  renderCrossBadge();
+}
+
+// ── Lineage section in the detail drawer ─────────────────────────────────────
+function renderAncestryTree(tankId, visited) {
+  visited = visited || new Set();
+  if (visited.has(tankId)) return '';
+  visited.add(tankId);
+  const tank  = findTank(tankId);
+  const cross = tank?.crossOrigin ? crosses.find(c => c.id === tank.crossOrigin) : null;
+  if (!cross) return '';
+  const parents = cross.incross ? [cross.parent1] : [cross.parent1, cross.parent2];
+  return `<ul class="lineage-tree">` + parents.map(pid => {
+    const p = findTank(pid);
+    return `<li>
+      <span class="lineage-node" onclick="openDrawer('${esc(pid)}')">${esc(p?.line || pid)} <small>${esc(pid)}</small></span>
+      ${renderAncestryTree(pid, visited)}
+    </li>`;
+  }).join('') + `</ul>`;
+}
+
+function buildLineageHtml(f) {
+  const origin    = f.crossOrigin ? crosses.find(c => c.id === f.crossOrigin) : null;
+  const asParent  = crosses.filter(c => c.parent1 === f.tankId || c.parent2 === f.tankId);
+
+  let parentsHtml = '';
+  if (origin) {
+    const chips = (origin.incross ? [origin.parent1] : [origin.parent1, origin.parent2]).map(pid =>
+      `<span class="cross-parent-chip" onclick="closeDrawer();openDrawer('${esc(pid)}')">${esc(findTank(pid)?.line || pid)}</span>`
+    ).join(origin.incross ? '' : ' <span class="cross-x">×</span> ');
+    parentsHtml = `<div class="drawer-row"><span class="drawer-row-label">Bred from</span><span class="drawer-row-val">${chips}</span></div>
+      <div class="drawer-row"><span class="drawer-row-label">Cross date</span><span class="drawer-row-val">${formatDate(origin.date)}</span></div>`;
+  }
+
+  let offspringHtml = '';
+  if (asParent.length) {
+    const rows = asParent.map(c => {
+      const kids = (c.offspring || []).length
+        ? c.offspring.map(id => `<span class="cross-parent-chip" onclick="closeDrawer();openDrawer('${esc(id)}')">${esc(findTank(id)?.line || id)}</span>`).join(' ')
+        : `<span style="color:var(--text-dim)">${c.status === 'active' ? 'pending' : 'none recorded'}</span>`;
+      return `<div class="lineage-cross-row"><span class="lineage-cross-label">${esc(crossLabel(c))} <small>(${formatDate(c.date)})</small></span><div>${kids}</div></div>`;
+    }).join('');
+    offspringHtml = `<div class="drawer-row-block"><span class="drawer-row-label">Crosses / offspring</span>${rows}</div>`;
+  }
+
+  const tree = origin ? renderAncestryTree(f.tankId) : '';
+  const treeHtml = tree ? `<details class="lineage-full"><summary>Full ancestry</summary>${tree}</details>` : '';
+
+  return `<div class="drawer-section">
+    <h4>🧬 Lineage</h4>
+    ${parentsHtml || offspringHtml ? '' : '<p style="color:var(--text-dim);font-size:.85rem;margin:.25rem 0">No breeding records for this tank yet.</p>'}
+    ${parentsHtml}
+    ${offspringHtml}
+    ${treeHtml}
+    <button class="btn-ghost btn-sm" style="margin-top:.5rem" onclick="startCrossFromTank('${esc(f.tankId)}')">🔀 Start cross from this tank</button>
+  </div>`;
+}
+
+window.startCrossFromTank = function(tankId) {
+  closeDrawer();
+  openNewCross(tankId);
+};
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -3346,6 +4098,6 @@ document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
     closeExperimentsDropdown();
     if (!document.getElementById('tank-picker-overlay')?.classList.contains('hidden')) closeTankPicker();
-    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); closeAlertPanel();
+    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); closeAlertPanel(); closeCrossesPanel(); closeNewCross();
   }
 });

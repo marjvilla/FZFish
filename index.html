@@ -202,8 +202,10 @@
           </label>
         </div>
       </div>
+      <div class="offspring-cross-note hidden" id="offspring-cross-note"></div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="button" class="btn-ghost hidden" id="save-add-another-btn" onclick="saveFishAddAnother()">Save &amp; Add Another</button>
         <button type="submit" class="btn-primary" id="save-btn">Save Tank</button>
       </div>
     </form>
@@ -247,6 +249,7 @@
       <button class="icon-btn" onclick="openScanner()" title="Scan barcode">📷</button>
       <button class="icon-btn" onclick="syncSheets()" title="Sync" id="sync-btn">⟳</button>
       <button class="icon-btn alert-btn" id="alert-btn" onclick="openAlertPanel()" title="Alerts">🔔</button>
+      <button class="icon-btn alert-btn" id="crosses-btn" onclick="openCrossesPanel()" title="Breeding & Lineage">🔀</button>
       <!-- Experiments -->
       <div class="exp-btn-wrap">
         <button class="btn-exp" id="experiments-btn" onclick="toggleExperimentsDropdown()">🧪 ▾</button>
@@ -293,6 +296,7 @@
     <button id="mob-img-btn" class="mob-icon-btn" onclick="toggleImgMode()" title="Toggle photos">🖼</button>
     <button id="mob-sel-btn" class="mob-icon-btn" onclick="enterSelectionModeAuto()" title="Select tanks">☑</button>
     <button id="mob-alert-btn" class="mob-icon-btn" onclick="openAlertPanel()" title="Alerts">🔔</button>
+    <button id="mob-crosses-btn" class="mob-icon-btn" onclick="openCrossesPanel()" title="Breeding & Lineage">🔀</button>
     <button class="filter-toggle-btn" onclick="openMobileFilters()">
       ⚙ Filters<span id="filter-active-count"></span>
     </button>
@@ -606,8 +610,37 @@
           <li><strong>Split / temp ID alert</strong> — triggered when you click the <strong>Split</strong> button under Tank ID. A 3-day reminder will fire to prompt you to replace the temporary SPL-ID with a real barcode. The alert auto-dismisses as soon as you save a valid barcode (C + 8 digits) for that tank.</li>
           <li><strong>Nursery ID alert</strong> — triggered silently when you save a Nursery tank without a valid barcode ID. A 3-day reminder will appear to prompt you to scan one in. Also auto-dismisses when a real barcode is saved.</li>
           <li><strong>Baffle removal alert</strong> — check <strong>🔔 Remind me to remove mesh baffles in 7 days</strong> in the Notes section when saving a tank. A 7-day reminder will appear in the alert panel.</li>
+          <li><strong>Breeding follow-up alert</strong> — created when you set up a cross in <strong>🔀 Breeding &amp; Lineage</strong>. Fires after the number of days you chose (default 7) and opens straight into the offspring recording flow.</li>
         </ul>
         <p>From the alert panel you can <strong>Snooze</strong> any alert for 1 hour, or <strong>Dismiss</strong> it permanently. Deleting a tank also dismisses all its alerts.</p>
+      </details>
+
+      <details class="guide-section">
+        <summary><h3>🔀 Breeding &amp; Lineage</h3></summary>
+        <p>Click the <strong>🔀</strong> button in the header (or mobile toolbar) to open the Breeding &amp; Lineage panel — this is where you set up crosses, follow them through to offspring, and trace a tank's family tree.</p>
+        <p><strong>Setting up a cross:</strong></p>
+        <ul>
+          <li>Click <strong>＋ New Cross</strong>, then pick <strong>Parent 1</strong> by scanning its barcode (📷) or choosing it from a searchable list (📋).</li>
+          <li>Toggle <strong>Incross</strong> to breed a single line against itself instead of picking a second parent.</li>
+          <li>Set the <strong>follow-up reminder</strong> — how many days until you're prompted to record offspring. Fully editable, default 7.</li>
+          <li>Optionally attach <strong>setup photos</strong> of the breeding tank and add notes. This is just a snapshot of the day, not a permanent record — photos are <strong>automatically deleted after 3 days</strong>.</li>
+          <li>Both parent tanks are automatically switched to <strong>Breeding</strong> status so they show up together in the inventory.</li>
+        </ul>
+        <p><strong>Recording offspring:</strong></p>
+        <ul>
+          <li>When the follow-up reminder fires, tap <strong>Record offspring</strong> from the alert or the cross card.</li>
+          <li>This opens the normal Add Tank form pre-filled with a suggested line name (<code>Parent1 × Parent2</code>, or <code>Line inx.</code> for an incross) — fully editable — and a note linking back to the parents.</li>
+          <li>Use <strong>Save &amp; Add Another</strong> to log as many resulting tanks as you need from one cross; the form stays open and resets between saves.</li>
+          <li>The cross is automatically marked <strong>completed</strong> once at least one offspring tank is recorded.</li>
+        </ul>
+        <p><strong>Managing a cross</strong> (from its card in the panel):</p>
+        <ul>
+          <li><strong>Edit</strong> — change either parent, the incross toggle, follow-up timing, notes, or photos at any time.</li>
+          <li><strong>📷 Photo</strong> — add more setup photos later.</li>
+          <li><strong>Mark done</strong> — close out the cross without recording offspring.</li>
+          <li><strong>Cancel</strong> — abandon the cross. <em>This can't be undone</em>; any setup photos are deleted.</li>
+        </ul>
+        <p><strong>Lineage:</strong> every tank's detail drawer has a <strong>🧬 Lineage</strong> section showing what it was bred from, any crosses it's been a parent in with their recorded offspring, and an expandable multi-generation ancestry tree. Use <strong>🔀 Start cross from this tank</strong> in the drawer to jump into New Cross with that tank pre-filled as Parent 1.</p>
       </details>
 
       <details class="guide-section">
@@ -686,6 +719,31 @@
       <button class="close-btn" onclick="closeAlertPanel()">✕</button>
     </div>
     <div class="alert-card-body" id="alert-panel-body"></div>
+  </div>
+</div>
+
+<!-- ── Breeding / Lineage panel ── -->
+<div id="crosses-overlay" class="overlay" onclick="if(event.target===this)closeCrossesPanel()">
+  <div class="alert-card">
+    <div class="alert-card-header">
+      <span>🔀 Breeding &amp; Lineage</span>
+      <button class="close-btn" onclick="closeCrossesPanel()">✕</button>
+    </div>
+    <div class="alert-card-body" id="crosses-panel-body"></div>
+  </div>
+</div>
+
+<!-- ── New Cross modal ── -->
+<div id="new-cross-overlay" class="overlay">
+  <div class="modal-card cross-modal">
+    <button class="close-btn" onclick="closeNewCross()">✕</button>
+    <h2>New Cross</h2>
+    <p class="field-note">Pick two tanks (or one for an incross). A follow-up reminder to record the offspring will fire after the set number of days.</p>
+    <div id="new-cross-body"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-ghost" onclick="closeNewCross()">Cancel</button>
+      <button type="button" class="btn-primary" id="new-cross-save" onclick="saveNewCross()" disabled>Set up cross</button>
+    </div>
   </div>
 </div>
 

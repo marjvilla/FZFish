@@ -3,7 +3,7 @@
 **GitHub:** [github.com/marjvilla/FZFish](https://github.com/marjvilla/FZFish)  
 **Live app:** [marjvilla.github.io/FZFish](https://marjvilla.github.io/FZFish/)
 
-A web-based zebrafish colony manager for Feng Lab, built on Google Sheets and Google Drive. Track tanks, filter by markers and status, scan barcodes, attach photos, set reminders, organize tanks into named experiments, and sub-group them by color — all synced to a shared Google Sheet in real time.
+A web-based zebrafish colony manager for Feng Lab, built on Google Sheets and Google Drive. Track tanks, filter by markers and status, scan barcodes, attach photos, set reminders, track breeding crosses and lineage, organize tanks into named experiments, and sub-group them by color — all synced to a shared Google Sheet in real time.
 
 > ⚠️ **Please do not edit the Google Sheet directly.** All changes should be made through the app — editing the sheet manually can break the inventory for everyone.
 
@@ -52,7 +52,7 @@ Set the tank's status when adding or editing. Used to filter the inventory:
 | **Active** | Adult fish living on the rack |
 | **Nursery** | Fish in the nursery system |
 | **Incubator** | Embryos or early larvae in the incubator |
-| **Breeding** | Currently set up in a breeding cross |
+| **Breeding** | Currently set up in a breeding cross (see **🔀 Breeding & Lineage** below) |
 | **Archived** | No longer active; kept for record |
 
 ---
@@ -152,10 +152,56 @@ Click the **🔔** button in the header (or mobile toolbar) to open the alert pa
 | **Split / temp ID** | Click **Split** under Tank ID | 3 days |
 | **Nursery ID** | Save a Nursery tank without a valid barcode | 3 days |
 | **Baffle removal** | Check the baffle reminder in Notes | 7 days |
+| **Breeding follow-up** | Set up a cross in **🔀 Breeding & Lineage** | Configurable (default 7 days) |
 
 - Split and Nursery ID alerts **auto-dismiss** as soon as you save a real barcode (C + 8 digits) for that tank.
+- Breeding follow-up alerts open straight into the **Record offspring** flow (see below).
 - From the panel you can **Snooze** an alert for 1 hour or **Dismiss** it permanently.
 - Deleting a tank also dismisses all its alerts.
+
+---
+
+### 🔀 Breeding & Lineage
+
+Click the **🔀** button in the header (or mobile toolbar) to open the Breeding & Lineage panel. This is where you set up crosses, track them through to offspring, and trace a tank's family tree.
+
+#### Setting up a cross
+
+Click **＋ New Cross**, then:
+
+- Pick **Parent 1** by scanning its barcode (📷) or choosing it from a searchable list (📋)
+- Toggle **Incross** to breed a single line against itself instead of picking a second parent
+- Set the **follow-up reminder** — how many days until you're prompted to record offspring (default 7, fully editable)
+- Optionally attach **setup photos** of the breeding tank and add notes — this is just a snapshot of the day, not a permanent record; photos are **automatically deleted after 3 days**
+- Both parent tanks are automatically set to **Breeding** status so they show up together in that section of the inventory
+
+#### Recording offspring
+
+When the follow-up reminder fires (from the alert panel or the cross card itself), tap **Record offspring**. This opens a normal Add Tank form pre-filled with:
+
+- A suggested line name (`Parent1 × Parent2`, or `Line inx.` for an incross) — **fully editable**
+- A note linking back to the parent tanks
+
+Use **Save & Add Another** to log as many resulting tanks as you need from a single cross (e.g. splitting offspring across multiple tanks) — the form stays open and resets between saves. The cross is automatically marked **completed** once at least one offspring tank is recorded.
+
+#### Managing a cross
+
+From any active cross card you can:
+
+- **Edit** — change either parent, the incross toggle, the follow-up timing, notes, or photos at any time
+- **📷 Photo** — add more setup photos later
+- **Mark done** — close out the cross without recording offspring
+- **Cancel** — abandon the cross *(this can't be undone; any setup photos are deleted)*
+
+#### Lineage
+
+Every tank's detail drawer has a **🧬 Lineage** section showing:
+
+- **Bred from** — the cross and parent tanks it came from, if any (click to jump to a parent)
+- **Crosses / offspring** — any crosses this tank has been a parent in, and the offspring tanks recorded from each
+- **Full ancestry** — an expandable, multi-generation family tree as far back as records go
+
+Use **🔀 Start cross from this tank** in the drawer to jump straight into New Cross with that tank pre-filled as Parent 1.
 
 ---
 
@@ -187,7 +233,7 @@ FZFish can be installed to your home screen and opens full-screen like a native 
 
 - **Frontend:** Vanilla JS, HTML, CSS — no framework, no build step
 - **Auth:** Google Identity Services (OAuth 2.0)
-- **Storage:** Google Sheets API v4 (inventory + experiments + changelog)
+- **Storage:** Google Sheets API v4 (inventory + experiments + changelog + lineage)
 - **Photos:** Google Drive API v3
 - **Barcode scanning:** [QuaggaJS](https://github.com/serratus/quaggaJS)
 - **Hosting:** GitHub Pages
