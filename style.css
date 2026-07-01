@@ -644,6 +644,7 @@ body.modal-open { overflow: hidden; }
   color: var(--text-muted); border-radius: var(--radius-sm);
   width: 30px; height: 30px; font-size: .9rem; cursor: pointer; flex-shrink: 0;
   display: none; align-items: center; justify-content: center;
+  position: relative;
   transition: border-color var(--transition), color var(--transition), opacity var(--transition);
 }
 .mob-icon-btn:hover  { border-color: var(--accent); color: var(--accent); }
@@ -847,6 +848,8 @@ body.modal-open { overflow: hidden; }
   display: flex; align-items: center; justify-content: space-between;
   padding: .6rem 1.25rem; gap: .75rem;
   border-bottom: 1px solid var(--border);
+  position: sticky; top: var(--header-h, 56px); z-index: 90;
+  background: rgba(13,17,23,.95); backdrop-filter: blur(8px);
 }
 .filter-chips {
   display: flex; gap: .4rem; flex-shrink: 1;
@@ -1032,7 +1035,7 @@ body.modal-open { overflow: hidden; }
   color: var(--text-muted); border-radius: 99px;
   padding: .15rem .65rem; font-size: .78rem; cursor: pointer;
   transition: border-color var(--transition), color var(--transition);
-  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  word-break: break-word;
 }
 .recent-line-pill:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -1652,7 +1655,11 @@ body.modal-open { overflow: hidden; }
   padding: .5rem .75rem;
   font-size: .9rem;
   font-family: var(--font-head);
+  outline: none;
+  transition: border-color .15s;
 }
+.picker-search-wrap input:focus { border-color: var(--accent); }
+.picker-search-wrap input::placeholder { color: var(--text-muted); }
 .picker-grid {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -1984,4 +1991,12 @@ body.modal-open { overflow: hidden; }
 
 @media (max-width: 600px) {
   .alert-card { max-width: 100%; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+}
+
+@media (max-width: 600px) {
+  .picker-card-wrap { width: 95vw; max-height: 90vh; }
+  .picker-grid { grid-template-columns: 1fr; padding: .5rem .75rem; }
+  .picker-header { padding: .75rem 1rem .6rem; }
+  .picker-search-wrap { padding: .5rem .75rem; }
+  .picker-footer { padding: .6rem .75rem; }
 }

@@ -1365,6 +1365,29 @@ function formatDate(d) {
   return isNaN(dt) ? d : dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// Convert stored YYYY-MM-DD → MM/DD/YYYY for the age text input
+function toDateInput(d) {
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return d || '';
+  const [y, m, day] = d.split('-');
+  return m + '/' + day + '/' + y;
+}
+// Convert typed MM/DD/YYYY → YYYY-MM-DD for storage
+function parseDateInput(v) {
+  if (!v) return '';
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return v;
+  return m[3] + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+}
+// Auto-format date input as user types (inserts slashes)
+window.autoFormatDate = function(inp) {
+  const prev = inp.value;
+  let digits = prev.replace(/\D/g, '').slice(0, 8);
+  let out = digits;
+  if (digits.length > 4) out = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
+  else if (digits.length > 2) out = digits.slice(0, 2) + '/' + digits.slice(2);
+  if (out !== prev) inp.value = out;
+};
+
 function formatDateTime(d) {
   if (!d) return '—';
   const dt = new Date(d.includes('T') || d.includes(' ') ? d.replace(' ', 'T') : d + 'T00:00:00');
@@ -2282,7 +2305,7 @@ function addRecentLine(line) {
   if (!line) return;
   const lines = getRecentLines().filter(l => l !== line);
   lines.unshift(line);
-  localStorage.setItem('fzfish-recent-lines', JSON.stringify(lines.slice(0, 3)));
+  localStorage.setItem('fzfish-recent-lines', JSON.stringify(lines.slice(0, 2)));
 }
 function renderRecentLines() {
   const el = document.getElementById('recent-lines');
@@ -2347,7 +2370,7 @@ window.openEditModal = function(id) {
   document.getElementById('modal-title').textContent = 'Edit Tank';
   document.getElementById('f-tank-id').value  = f.tankId || f.id || '';
   document.getElementById('f-line').value     = f.line;
-  document.getElementById('f-age').value      = f.age || '';
+  document.getElementById('f-age').value      = toDateInput(f.age);
   document.getElementById('f-count').value    = f.count || '';
   setLocInForm(f.location || '');
   document.getElementById('f-notes').value    = f.notes || '';
@@ -2385,7 +2408,7 @@ window.duplicateFish = function(id) {
   document.getElementById('modal-title').textContent = 'Duplicate Tank';
   document.getElementById('f-tank-id').value = '';
   document.getElementById('f-line').value    = f.line || '';
-  document.getElementById('f-age').value     = f.age  || '';
+  document.getElementById('f-age').value     = toDateInput(f.age);
   document.getElementById('f-count').value   = f.count || '';
   setLocInForm(f.location || '');
   document.getElementById('f-notes').value   = '';
@@ -2493,6 +2516,17 @@ window.saveFish = async function(e) {
     return;
   }
   if (hint) hint.style.display = 'none';
+
+  // Block save if this tank ID is already used by a different tank
+  if (rawId) {
+    const duplicate = fishData.find(f => f.tankId && f.tankId.toUpperCase() === rawId && f.id !== (editingId || ''));
+    if (duplicate) {
+      showToast(`⚠️ Tank ID ${rawId} is already used by "${duplicate.line || duplicate.id}"`);
+      document.getElementById('f-tank-id').focus();
+      return;
+    }
+  }
+
   const oldStatus = editingId ? fishData.find(x => x.id === editingId)?.status : null;
 
   saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
@@ -2511,7 +2545,7 @@ window.saveFish = async function(e) {
     tankId:     enteredId || fallbackId,
     line:       document.getElementById('f-line').value.trim(),
     unsorted:   [...currentUnsortedMarkers],
-    age:        document.getElementById('f-age').value.trim(),
+    age:        parseDateInput(document.getElementById('f-age').value.trim()),
     count:      parseInt(document.getElementById('f-count').value) || 0,
     location:   getLocFromForm(),
     markers:    [...currentMarkers],
@@ -2976,7 +3010,18 @@ function handleBarcodeDetected(result) {
   showToast(`📷 Scanned: ${code.toUpperCase()}`);
   if (scanForForm) {
     scanForForm = false;
-    document.getElementById('f-tank-id').value = code.toUpperCase();
+    const upper = code.toUpperCase();
+    const existing = fishData.find(f => (f.tankId || '').toUpperCase() === upper);
+    if (existing && !editingId) {
+      showToast(`⚠️ ${upper} already exists — opening that tank`);
+      closeModal();
+      openDrawer(existing.id);
+      return;
+    }
+    if (existing && editingId && existing.id !== editingId) {
+      showToast(`⚠️ ${upper} is already in use by another tank`);
+    }
+    document.getElementById('f-tank-id').value = upper;
     return;
   }
   const found = fishData.find(f => (f.tankId || '').trim().toLowerCase() === code.toLowerCase());
@@ -3025,6 +3070,16 @@ window.manualBarcode = function() {
   closeScanner();
   showToast(`📷 Entered: ${v}`);
   if (wasFormScan) {
+    const existing = fishData.find(f => (f.tankId || '').toUpperCase() === v);
+    if (existing && !editingId) {
+      showToast(`⚠️ ${v} already exists — opening that tank`);
+      closeModal();
+      openDrawer(existing.id);
+      return;
+    }
+    if (existing && editingId && existing.id !== editingId) {
+      showToast(`⚠️ ${v} is already in use by another tank`);
+    }
     document.getElementById('f-tank-id').value = v;
     return;
   }
