@@ -1512,9 +1512,48 @@ body.modal-open { overflow: hidden; }
   font-family: var(--font-head);
   width: 180px;
 }
-.exp-bar-rename-btn { background: none; border: none; cursor: pointer; font-size: .85rem; opacity: .6; }
+.exp-bar-rename-btn { background: none; border: none; cursor: pointer; font-size: .85rem; opacity: .6; position: relative; }
 .exp-bar-rename-btn:hover { opacity: 1; }
 .exp-bar-right { display: flex; align-items: center; gap: .5rem; }
+
+/* Notes "tab" — a distinct bubble so it reads as its own control, not just an icon */
+.exp-notes-tab {
+  position: relative;
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: 99px;
+  padding: .25rem .7rem; font-size: .78rem; cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.exp-notes-tab:hover { border-color: var(--accent); color: var(--accent); }
+.exp-notes-tab.active { background: rgba(88,166,255,.15); border-color: var(--accent); color: var(--accent); }
+.exp-notes-tab.has-notes { border-color: var(--accent); color: var(--accent); }
+.exp-notes-tab.has-notes::after {
+  content: ''; position: absolute; top: -3px; right: -3px;
+  width: 8px; height: 8px; border-radius: 99px; background: var(--accent);
+  border: 2px solid var(--surface);
+}
+
+/* Experiment notes panel */
+.exp-notes-panel {
+  padding: .75rem 1.25rem; background: rgba(88,166,255,.04);
+  border-bottom: 1px solid rgba(88,166,255,.15);
+  display: flex; align-items: stretch; gap: .6rem;
+}
+.exp-notes-panel.hidden { display: none; }
+.exp-notes-input {
+  flex: 1; box-sizing: border-box; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); padding: .65rem .8rem; font-size: .9rem;
+  font-family: inherit; resize: vertical; outline: none;
+  min-height: 130px; line-height: 1.5;
+}
+.exp-notes-input:focus { border-color: var(--accent); }
+.exp-notes-input::placeholder { color: var(--text-muted); }
+.exp-notes-status {
+  font-size: .74rem; color: var(--text-dim); flex-shrink: 0;
+  padding-top: .7rem; min-width: 42px;
+}
 .btn-exp-action {
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -2154,3 +2193,31 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 600px) {
   .cross-modal { max-width: 100%; }
 }
+
+/* ── DPF Calculator (help guide) ── */
+.dpf-calc-box {
+  background: rgba(88,166,255,.06); border: 1px solid rgba(88,166,255,.25);
+  border-radius: var(--radius-lg); padding: .9rem 1rem; margin-bottom: 1rem;
+}
+.dpf-calc-title { margin: 0 0 .3rem; font-size: 1rem; }
+.dpf-calc-row { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .6rem; }
+.dpf-calc-field { flex: 1; min-width: 150px; }
+.dpf-calc-field > label {
+  display: block; font-size: .78rem; color: var(--text-muted);
+  margin-bottom: .3rem; font-weight: 600;
+}
+.dpf-calc-field > label .field-note { font-weight: 400; display: inline; margin: 0; }
+.dpf-calc-field input {
+  width: 100%; box-sizing: border-box; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); padding: .5rem .7rem; font-size: .9rem;
+  font-family: inherit; outline: none; transition: border-color .15s;
+}
+.dpf-calc-field input:focus { border-color: var(--accent); }
+.dpf-calc-field input::placeholder { color: var(--text-muted); }
+.dpf-calc-result {
+  margin-top: .7rem; font-size: .9rem; color: var(--text-muted);
+  padding-top: .6rem; border-top: 1px solid rgba(88,166,255,.2);
+}
+.dpf-calc-result strong { color: var(--accent); font-size: 1.05rem; }
+.dpf-calc-result.dpf-calc-negative strong { color: var(--red); }

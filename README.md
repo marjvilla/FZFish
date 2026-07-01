@@ -63,6 +63,12 @@ Please add photos at each stage — **including embryo plates** — to make the 
 
 ---
 
+### 🧮 DPF Calculator
+
+Open the in-app help guide (click the 🐟 logo) — a **DPF Calculator** sits at the top, above the guide sections. Enter a fertilization date and, optionally, a second date to compare against (defaults to today) and it instantly calculates days post fertilization, using the same day-0-is-the-fertilization-date rule as the rest of the app.
+
+---
+
 ### 📷 Barcode Scanning
 
 Tap the 📷 icon in the header to scan a tank barcode. The app will jump straight to that tank or start a new tank entry. You can also scan while adding or editing a tank to fill in the Tank ID automatically.
@@ -136,6 +142,7 @@ Use **🧪 ▾** in the header to create or open a named experiment. Experiments
 - **⬤ Group** — enter group-assignment mode: pick a color (green, red, blue, yellow) then click tanks to assign them to that sub-group
 - **Group by Color** — toggle to sort cards by their assigned color group, with color-coded section headers
 - **✏️** in the experiment bar — rename the experiment inline
+- **📝** in the experiment bar — add or edit free-form notes about the experiment; saves automatically on blur, and the icon shows a dot when notes exist
 - **Delete** — permanently deletes the experiment tab *(this can't be undone)*
 - **✕ Exit** — return to the full inventory
 

@@ -274,6 +274,7 @@
       <input id="exp-name-input" class="exp-bar-input hidden" type="text"
         onblur="saveRenameExp()" onkeydown="if(event.key==='Enter')saveRenameExp()" />
       <button class="exp-bar-rename-btn" onclick="startRenameExp()" title="Rename">✏️</button>
+      <button id="exp-notes-toggle-btn" class="exp-notes-tab" onclick="toggleExpNotes()" title="Notes">📝 Notes</button>
     </div>
     <div class="exp-bar-right">
       <button class="btn-exp-action" onclick="enterSelectionModeForExperiment()">＋ Add Tanks</button>
@@ -288,6 +289,14 @@
       <button class="btn-exp-action danger" onclick="deleteExperiment()">Delete</button>
       <button class="btn-exp-close" onclick="exitExperiment()">✕ Exit</button>
     </div>
+  </div>
+
+  <!-- Experiment notes (collapsible) -->
+  <div id="exp-notes-panel" class="exp-notes-panel hidden">
+    <textarea id="exp-notes-input" class="exp-notes-input" rows="6"
+      placeholder="Notes about this experiment…"
+      onblur="saveExpNotesFromInput()"></textarea>
+    <span id="exp-notes-status" class="exp-notes-status"></span>
   </div>
 
   <!-- Mobile: mini stat counts + filter button (hidden on desktop) -->
@@ -490,6 +499,22 @@
 
     <div class="guide-body">
 
+      <div class="dpf-calc-box">
+        <h3 class="dpf-calc-title">🧮 DPF Calculator</h3>
+        <p class="field-note">Enter a fertilization date and (optionally) a second date to calculate days post fertilization between them.</p>
+        <div class="dpf-calc-row">
+          <div class="dpf-calc-field">
+            <label>Fertilization date</label>
+            <input type="text" id="dpf-calc-date1" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off" maxlength="10" oninput="autoFormatDate(this);runDpfCalculator()" />
+          </div>
+          <div class="dpf-calc-field">
+            <label>Compare to <span class="field-note">(default: today)</span></label>
+            <input type="text" id="dpf-calc-date2" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off" maxlength="10" oninput="autoFormatDate(this);runDpfCalculator()" />
+          </div>
+        </div>
+        <div class="dpf-calc-result" id="dpf-calc-result">Enter a fertilization date to calculate dpf.</div>
+      </div>
+
       <div class="guide-warning">
         ⚠️ <strong>Please do not edit the Google Sheet directly.</strong> All changes should be made through this app — editing the sheet manually can break the inventory for everyone.
       </div>
@@ -597,6 +622,7 @@
           <li>Click <strong>⬤ Group</strong> to enter color-assignment mode. Choose a color (green, red, blue, yellow) then click tanks to assign them to that sub-group.</li>
           <li>Toggle <strong>Group by Color</strong> in the experiment bar to sort cards by their assigned color, with color-coded section headers.</li>
           <li>Rename an experiment by clicking ✏️ in the experiment bar.</li>
+          <li>Click <strong>📝</strong> in the experiment bar to add or edit free-form notes about the experiment. Notes save automatically when you click away from the text box, and the icon shows a dot when notes exist.</li>
           <li>Click <strong>Delete</strong> to permanently remove the experiment. <em>This can't be undone.</em></li>
           <li>Click <strong>✕ Exit</strong> to return to the full inventory.</li>
           <li>You can also add or remove a tank from any experiment directly from its detail drawer.</li>
