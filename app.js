@@ -5,7 +5,12 @@ const CLIENT_ID     = '239772949162-ctqj91o3e56lep520shlo1trhq0rv42r.apps.google
 const SHEET_ID      = '1AviXu1_KPFRx158Af05qBmA-LCw2GhxJxvfZEFUCuqY';
 const TAB_NAME      = 'Fish';
 const DRIVE_FOLDER  = '1VTpNTlB-JMLPZNKzgm0IIXCRkk9Agzf7';
-const SCOPES        = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file openid email';
+const SCOPES        = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/calendar.events openid email';
+// Shared, subscribable Google Calendar that alert events get written to — NOT a personal calendar.
+// Set this to the Calendar ID of a shared calendar (Calendar settings → Integrate calendar → Calendar ID)
+// after following the "Setting up Google Calendar Sync" steps in the README. Looks like
+// "abc123...@group.calendar.google.com". Leave blank to disable the feature entirely.
+const GCAL_ID       = 'c_de94b9269ee872ee8ef5f198da77b020ce2e9a723ecb10a3fe700120a8292d09@group.calendar.google.com';
 
 // ── State ────────────────────────────────────────────────────────────────────
 let tokenClient       = null;
@@ -41,7 +46,7 @@ let scannerRunning    = false;
 let scanForForm       = false;
 let experiments       = [];
 let currentExperiment = null;
-let groupByColor      = false;
+let groupFilterColor  = null;       // 'green'|'red'|'blue'|'yellow'|'none'|null — highlights one group
 let pickerSelected    = new Set();
 let sortDir           = -1;  // -1 = desc (newest first for dates), 1 = asc
 let imgOff            = localStorage.getItem('fzfish-img-off') === 'true';
@@ -51,7 +56,6 @@ let alertCache            = null;   // null = not loaded; [] or array = loaded f
 // ── Breeding / lineage state ──
 let crosses           = [];         // loaded from the Lineage tab
 let lineageTabReady   = false;      // true once we know the Lineage tab exists
-let offspringCrossId  = null;       // set while recording offspring for a cross
 let newCrossParents   = [null, null]; // tankIds being assembled in the New Cross modal
 let newCrossIncross   = false;
 let newCrossPhotos    = [];         // photo URLs uploaded for the setup being created
@@ -256,6 +260,11 @@ window.useDemoMode = function() {
   demoMode = true;
   localStorage.setItem('fzfish-demo', 'true');
   fishData = DEMO.map((d, i) => ({ ...d, id: d.tankId, _rowIndex: i + 2 }));
+  // Test Mode is billed as "Not Saved" — start every session clean rather than
+  // carrying over crosses/experiments left behind by a previous demo session
+  crosses = [];
+  experiments = [];
+  localStorage.removeItem(CROSS_KEY);
   showApp();
   showToast('🐠 Demo mode active — data not saved');
 };
@@ -267,9 +276,25 @@ function showApp() {
   if (signoutBtn) signoutBtn.textContent = demoMode ? 'Exit Demo' : 'Sign Out';
   renderAll();
   checkAlerts();   // async — fire-and-forget, badge/toast updates when ready
+  syncAllAlertsToCalendar();  // async — pushes any alerts missing a calendar event, whoever's signed in
   fetchCrosses().then(renderCrossBadge);  // load breeding crosses in the background
+  showNavHintOnce();
   // Migration wizards are intentionally not auto-triggered.
   // Run manually via console if needed: checkLocationMigration() or checkUnsortedMigration()
+}
+
+// One-time hint pointing first-time users at the 🐟 nav menu
+function showNavHintOnce() {
+  if (localStorage.getItem('fzfish-nav-hint-shown')) return;
+  const nav = document.getElementById('nav-wrap');
+  if (!nav) return;
+  nav.classList.add('nav-hint-pulse');
+  let dismissed = false;
+  const dismiss = () => { dismissed = true; nav.classList.remove('nav-hint-pulse'); localStorage.setItem('fzfish-nav-hint-shown', 'true'); };
+  // Delay the toast so it isn't overwritten by the sign-in/demo toast that fires on load
+  setTimeout(() => { if (!dismissed) showToast('👋 Click the 🐟 logo to switch between Inventory, Breeding & Lineage, and Experiments'); }, 3600);
+  nav.addEventListener('click', dismiss, { once: true });
+  setTimeout(dismiss, 20000);   // stop pulsing on its own if never clicked
 }
 
 async function fetchUserInfo() {
@@ -422,9 +447,50 @@ async function fetchExperiments() {
     const reserved = new Set([TAB_NAME.toLowerCase(), 'changelog', LINEAGE_TAB.toLowerCase()]);
     const expSheets = (json.sheets || []).map(s => s.properties).filter(p => !reserved.has(p.title.toLowerCase()));
     // Only store names/gids — tank IDs are loaded lazily when an experiment is opened
-    experiments = expSheets.map(p => ({ name: p.title, gid: p.sheetId, tankIds: null, tankGroups: null }));
-    renderExperimentsDropdown();
+    experiments = expSheets.map(p => ({ name: p.title, gid: p.sheetId, tankIds: null, tankGroups: null, notes: null, date: null }));
+    renderExperimentsListView();
   } catch(e) { console.warn('fetchExperiments:', e.message); }
+}
+
+// Always re-fetches the experiment list from the sheet so it can't go stale/"shaky"
+async function openExperimentsTab() {
+  if (!demoMode) {
+    document.getElementById('experiments-view-body').innerHTML = '<p class="alert-empty">Loading experiments…</p>';
+    await fetchExperiments();
+  } else {
+    renderExperimentsListView();
+  }
+}
+
+async function loadExpNotes(tabName) {
+  try {
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!D1`);
+    const d = await r.json();
+    return d.values?.[0]?.[0] || '';
+  } catch(e) { return ''; }
+}
+
+async function saveExpNotes(tabName, notes) {
+  await authFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!D1?valueInputOption=RAW`,
+    { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: [[notes]] }) }
+  );
+}
+
+// Experiment date piggybacks one cell over from notes (D1) — E1, same pattern
+async function loadExpDate(tabName) {
+  try {
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!E1`);
+    const d = await r.json();
+    return d.values?.[0]?.[0] || '';
+  } catch(e) { return ''; }
+}
+
+async function saveExpDate(tabName, date) {
+  await authFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!E1?valueInputOption=RAW`,
+    { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: [[date]] }) }
+  );
 }
 
 async function loadExpTankIds(tabName) {
@@ -450,50 +516,42 @@ async function saveExpTankIds(tabName, tankIds, tankGroups = {}) {
   }
 }
 
-function renderExperimentsDropdown() {
-  const list = document.getElementById('experiments-list');
-  if (!list) return;
-  list.innerHTML = experiments.length
+function renderExperimentsListView() {
+  const body = document.getElementById('experiments-view-body');
+  if (!body) return;
+  let html = `<button class="btn-primary btn-sm exp-new-btn" onclick="createExperiment()">＋ New Experiment</button>`;
+  html += experiments.length
     ? experiments.map((exp, i) => `
-        <button class="exp-dd-row${currentExperiment?.gid === exp.gid ? ' exp-dd-active' : ''}"
-            onclick="enterExperiment(${i});closeExperimentsDropdown()">
-          <span class="exp-dd-name">${esc(exp.name)}</span>
-          <span class="exp-dd-count">${exp.tankIds === null ? '…' : exp.tankIds.length + ' tanks'}</span>
+        <button class="exp-list-row${currentExperiment?.gid === exp.gid ? ' exp-list-active' : ''}"
+            onclick="enterExperiment(${i})">
+          <span class="exp-list-name">${esc(exp.name)}</span>
+          <span class="exp-list-meta">
+            ${exp.date ? `<span class="exp-list-date">📅 ${esc(formatDate(exp.date))}</span>` : ''}
+            <span class="exp-list-count">${exp.tankIds === null ? '…' : exp.tankIds.length + ' tanks'}</span>
+          </span>
         </button>`).join('')
-    : '<p class="exp-dd-empty">No experiments yet.</p>';
+    : '<p class="alert-empty">No experiments yet. Create one to start grouping tanks.</p>';
+  body.innerHTML = html;
 }
-
-window.toggleExperimentsDropdown = function() {
-  const dd = document.getElementById('experiments-dropdown');
-  if (dd.classList.contains('hidden')) {
-    renderExperimentsDropdown();
-    const rect = document.getElementById('experiments-btn').getBoundingClientRect();
-    dd.style.top   = (rect.bottom + 4) + 'px';
-    dd.style.right = (window.innerWidth - rect.right) + 'px';
-    dd.classList.remove('hidden');
-  } else {
-    dd.classList.add('hidden');
-  }
-};
-window.closeExperimentsDropdown = function() {
-  document.getElementById('experiments-dropdown')?.classList.add('hidden');
-};
 
 window.enterExperiment = async function(idx) {
   const exp = experiments[idx];
   if (!exp) return;
 
-  // Lazy-load tank IDs the first time this experiment is opened
-  if (exp.tankIds === null) {
-    showToast('Loading experiment…');
-    if (demoMode) {
-      exp.tankIds   = [];
-      exp.tankGroups = {};
-    } else {
-      const loaded  = await loadExpTankIds(exp.name);
-      exp.tankIds   = loaded.ids;
-      exp.tankGroups = loaded.groups;
-    }
+  // Always reload fresh from the sheet (rather than relying on a cached load from
+  // earlier in the session) so the experiment's tank list and notes can't go stale
+  showToast('Loading experiment…');
+  if (demoMode) {
+    exp.tankIds    = exp.tankIds || [];
+    exp.tankGroups = exp.tankGroups || {};
+    exp.notes      = exp.notes || '';
+    exp.date       = exp.date || '';
+  } else {
+    const [loaded, notes, date] = await Promise.all([loadExpTankIds(exp.name), loadExpNotes(exp.name), loadExpDate(exp.name)]);
+    exp.tankIds    = loaded.ids;
+    exp.tankGroups = loaded.groups;
+    exp.notes      = notes;
+    exp.date       = date;
   }
 
   const validIds = new Set(fishData.map(f => f.tankId));
@@ -503,25 +561,70 @@ window.enterExperiment = async function(idx) {
     if (!demoMode) saveExpTankIds(exp.name, cleaned, exp.tankGroups || {});
   }
   currentExperiment = exp;
-  document.getElementById('experiment-bar').classList.remove('hidden');
+  activeMainTab      = 'experiments';
   document.getElementById('exp-name-display').textContent = exp.name;
   document.getElementById('exp-name-input').classList.add('hidden');
   document.getElementById('exp-name-display').classList.remove('hidden');
   document.getElementById('filter-panel')?.classList.add('exp-mode');
   document.getElementById('filter-toggle-bar')?.classList.add('exp-mode');
   document.getElementById('app')?.classList.add('in-experiment');
+  document.getElementById('exp-notes-panel')?.classList.add('hidden');
+  document.getElementById('exp-notes-toggle-btn')?.classList.remove('active');
+  document.getElementById('exp-notes-toggle-btn')?.classList.toggle('has-notes', !!(exp.notes || '').trim());
+  renderExpDatePill();
+  resetGroupFilter();
+  updateMainView();
   renderAll();
 };
 
 window.exitExperiment = function() {
   currentExperiment = null;
-  groupByColor      = false;
-  document.getElementById('group-color-btn')?.classList.remove('active');
-  document.getElementById('experiment-bar').classList.add('hidden');
+  resetGroupFilter();
   document.getElementById('filter-panel')?.classList.remove('exp-mode');
   document.getElementById('filter-toggle-bar')?.classList.remove('exp-mode');
   document.getElementById('app')?.classList.remove('in-experiment');
+  document.getElementById('exp-notes-panel')?.classList.add('hidden');
+  document.getElementById('exp-notes-toggle-btn')?.classList.remove('active');
+  // Back to the experiments list (still on the Experiments tab)
+  if (activeMainTab === 'experiments') renderExperimentsListView();
+  updateMainView();
   renderAll();
+};
+
+window.toggleExpNotes = function() {
+  if (!currentExperiment) return;
+  const panel = document.getElementById('exp-notes-panel');
+  const nowHidden = panel.classList.toggle('hidden');
+  const open = !nowHidden;
+  document.getElementById('exp-notes-toggle-btn')?.classList.toggle('active', open);
+  if (open) {
+    document.getElementById('exp-notes-input').value = currentExperiment.notes || '';
+    document.getElementById('exp-notes-status').textContent = '';
+    setTimeout(() => document.getElementById('exp-notes-input')?.focus(), 30);
+  }
+};
+
+window.saveExpNotesFromInput = async function() {
+  if (!currentExperiment) return;
+  const input  = document.getElementById('exp-notes-input');
+  const status = document.getElementById('exp-notes-status');
+  const notes  = input.value;
+  if (notes === (currentExperiment.notes || '')) return;
+  currentExperiment.notes = notes;
+  const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
+  if (idx !== -1) experiments[idx].notes = notes;
+  document.getElementById('exp-notes-toggle-btn')?.classList.toggle('has-notes', !!notes.trim());
+  if (demoMode) { if (status) status.textContent = 'Saved'; return; }
+  if (status) status.textContent = 'Saving…';
+  try {
+    await saveExpNotes(currentExperiment.name, notes);
+    if (status) status.textContent = 'Saved';
+    logChange('Experiment Notes Edited', { line: currentExperiment.name },
+      notes.trim() ? `Notes: ${notes.length > 200 ? notes.slice(0, 200) + '…' : notes}` : 'Notes cleared');
+  } catch(e) {
+    if (status) status.textContent = '';
+    showToast('❌ Failed to save notes');
+  }
 };
 
 // ── Selection mode ────────────────────────────────────────────────────────────
@@ -546,11 +649,28 @@ window.enterSelectionModeAuto = function() {
   else enterSelectionMode(null);
 };
 
-window.toggleGroupByColor = function() {
-  groupByColor = !groupByColor;
-  document.getElementById('group-color-btn')?.classList.toggle('active', groupByColor);
-  renderGrid();
+// "⬤ Group" button — opens a menu of colors to add the currently-selected tanks to
+window.toggleGroupAssignMenu = function() {
+  document.getElementById('group-assign-menu')?.classList.toggle('hidden');
 };
+window.startGroupAssign = function(color) {
+  document.getElementById('group-assign-menu')?.classList.add('hidden');
+  enterSelectionModeForGroup(color);
+};
+
+// Color swatches on the bar — click one to highlight (filter to) just that group
+window.toggleGroupFilter = function(color) {
+  groupFilterColor = groupFilterColor === color ? null : color;
+  document.querySelectorAll('.exp-group-btns .exp-group-swatch').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.color === groupFilterColor);
+  });
+  filterFish();
+};
+function resetGroupFilter() {
+  groupFilterColor = null;
+  document.querySelectorAll('.exp-group-btns .exp-group-swatch').forEach(btn => btn.classList.remove('active'));
+  document.getElementById('group-assign-menu')?.classList.add('hidden');
+}
 
 const GROUP_COLORS = ['green', 'red', 'blue', 'yellow'];
 const GROUP_LABELS = { green: '🟢', red: '🔴', blue: '🔵', yellow: '🟡' };
@@ -580,6 +700,9 @@ window.assignGroupToSelected = async function() {
   const expIdx = experiments.findIndex(e => e.gid === exp.gid);
   if (expIdx !== -1) experiments[expIdx].tankGroups = exp.tankGroups;
   if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups);
+  const assignedIds = [...selectedTankIds].map(id => fishData.find(f => f.id === id)?.tankId).filter(Boolean);
+  logChange('Experiment Groups Updated', { line: exp.name },
+    color === 'none' ? `Cleared group: ${assignedIds.join(', ')}` : `${color} group: ${assignedIds.join(', ')}`);
   const n = selectedTankIds.size;
   showToast(color === 'none'
     ? `○ Cleared group for ${n} tank${n > 1 ? 's' : ''}`
@@ -797,6 +920,7 @@ window.addSelectedToExperiment = async function(expName) {
   if (newIds.length) {
     exp.tankIds = [...exp.tankIds, ...newIds];
     if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
+    logChange('Experiment Tanks Added', { line: exp.name }, `Added: ${newIds.join(', ')}`);
     showToast(`✅ Added ${newIds.length} tank${newIds.length > 1 ? 's' : ''} to "${expName}"`);
   } else {
     showToast('Already in that experiment');
@@ -811,16 +935,21 @@ window.confirmSelectionAction = async function() {
     const exp      = selectionContext.exp;
     const newList  = [...selectedTankIds]
       .map(uid => fishData.find(f => f.id === uid)?.tankId).filter(Boolean);
-    const added    = newList.filter(tid => !exp.tankIds.includes(tid)).length;
-    const removed  = exp.tankIds.filter(tid => !newList.includes(tid)).length;
+    const addedIds   = newList.filter(tid => !exp.tankIds.includes(tid));
+    const removedIds = exp.tankIds.filter(tid => !newList.includes(tid));
     // Clean up group assignments for removed tanks
-    exp.tankIds.filter(tid => !newList.includes(tid))
-      .forEach(tid => { if (exp.tankGroups) delete exp.tankGroups[tid]; });
+    removedIds.forEach(tid => { if (exp.tankGroups) delete exp.tankGroups[tid]; });
     exp.tankIds = newList;
     if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
+    if (addedIds.length || removedIds.length) {
+      logChange('Experiment Tanks Updated', { line: exp.name }, [
+        addedIds.length   ? `Added: ${addedIds.join(', ')}`     : null,
+        removedIds.length ? `Removed: ${removedIds.join(', ')}` : null,
+      ].filter(Boolean).join(' | '));
+    }
     const parts = [];
-    if (added)   parts.push(`+${added} added`);
-    if (removed) parts.push(`−${removed} removed`);
+    if (addedIds.length)   parts.push(`+${addedIds.length} added`);
+    if (removedIds.length) parts.push(`−${removedIds.length} removed`);
     showToast(parts.length ? `✅ ${parts.join(', ')}` : '✅ No changes');
     exitSelectionMode();
   } else if (selectionContext?.type === 'experiment-remove') {
@@ -837,6 +966,7 @@ window.confirmSelectionAction = async function() {
     const expIdx   = experiments.findIndex(e => e.gid === exp.gid);
     if (expIdx !== -1) { experiments[expIdx].tankIds = exp.tankIds; experiments[expIdx].tankGroups = exp.tankGroups; }
     if (!demoMode) await saveExpTankIds(exp.name, exp.tankIds, exp.tankGroups || {});
+    logChange('Experiment Tanks Removed', { line: exp.name }, `Removed: ${tankIds.join(', ')}`);
     showToast(`✕ Removed ${n} tank${n > 1 ? 's' : ''} from "${exp.name}"`);
     exitSelectionMode();
   }
@@ -884,13 +1014,14 @@ window.saveRenameExp = async function() {
   display.textContent = newName;
   currentExperiment.name = newName;
   if (idx !== -1) experiments[idx].name = newName;
-  renderExperimentsDropdown();
+  renderExperimentsListView();
   if (demoMode) return;
   try {
     await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: currentExperiment.gid, title: newName }, fields: 'title' } }] }),
     });
+    logChange('Experiment Renamed', { line: newName }, `"${oldName}" → "${newName}"`);
   } catch(e) {
     showToast('❌ Rename failed');
     currentExperiment.name = oldName;
@@ -899,13 +1030,53 @@ window.saveRenameExp = async function() {
   }
 };
 
+// ── Experiment date pill ──────────────────────────────────────────────────────
+function renderExpDatePill() {
+  const pill = document.getElementById('exp-date-pill');
+  if (!pill || !currentExperiment) return;
+  pill.textContent = currentExperiment.date ? `📅 ${formatDate(currentExperiment.date)}` : '📅 Set date';
+  pill.classList.toggle('has-date', !!currentExperiment.date);
+}
+
+window.startEditExpDate = function() {
+  const pill  = document.getElementById('exp-date-pill');
+  const input = document.getElementById('exp-date-input');
+  if (!pill || !input) return;
+  input.value = currentExperiment.date ? toDateInput(currentExperiment.date) : '';
+  pill.classList.add('hidden');
+  input.classList.remove('hidden');
+  input.focus();
+};
+
+window.saveExpDateFromInput = async function() {
+  const pill  = document.getElementById('exp-date-pill');
+  const input = document.getElementById('exp-date-input');
+  const raw   = input.value.trim();
+  input.classList.add('hidden');
+  pill.classList.remove('hidden');
+  if (raw && !isValidDateInput(raw)) { showToast('⚠️ Enter a valid date (MM/DD/YYYY)'); return; }
+  const newDate = raw ? parseDateInput(raw) : '';
+  if (newDate === (currentExperiment.date || '')) return;
+  const oldDate = currentExperiment.date || '';
+  currentExperiment.date = newDate;
+  const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
+  if (idx !== -1) experiments[idx].date = newDate;
+  renderExpDatePill();
+  if (!demoMode) {
+    try {
+      await saveExpDate(currentExperiment.name, newDate);
+      logChange('Experiment Date Edited', { line: currentExperiment.name },
+        newDate ? `${oldDate ? `"${formatDate(oldDate)}" → ` : ''}"${formatDate(newDate)}"` : 'Date cleared');
+    } catch(e) { showToast('❌ Failed to save date'); }
+  }
+};
+
 window.createExperiment = async function() {
-  closeExperimentsDropdown();
   const name = prompt('Experiment name:');
   if (!name?.trim()) return;
   const trimmed = name.trim();
   if (demoMode) {
-    const exp = { name: trimmed, gid: Date.now(), tankIds: [], tankGroups: {} };
+    const exp = { name: trimmed, gid: Date.now(), tankIds: [], tankGroups: {}, notes: '', date: '' };
     experiments.push(exp);
     enterExperiment(experiments.length - 1);
     return;
@@ -922,8 +1093,9 @@ window.createExperiment = async function() {
       `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(trimmed)}!A1?valueInputOption=RAW`,
       { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ values: [['Tank ID', 'Group']] }) }
     );
-    const exp = { name: props.title, gid: props.sheetId, tankIds: [], tankGroups: {} };
+    const exp = { name: props.title, gid: props.sheetId, tankIds: [], tankGroups: {}, notes: '', date: '' };
     experiments.push(exp);
+    logChange('Experiment Created', { line: exp.name });
     enterExperiment(experiments.length - 1);
   } catch(e) { showToast('❌ ' + e.message); }
 };
@@ -934,13 +1106,15 @@ window.deleteExperiment = async function() {
   const exp = currentExperiment;
   exitExperiment();
   experiments = experiments.filter(e => e.gid !== exp.gid);
-  renderExperimentsDropdown();
+  renderExperimentsListView();
   if (demoMode) return;
   try {
     await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ requests: [{ deleteSheet: { sheetId: exp.gid } }] }),
     });
+    logChange('Experiment Deleted', { line: exp.name },
+      `Had ${(exp.tankIds || []).length} tank${(exp.tankIds || []).length !== 1 ? 's' : ''}`);
   } catch(e) { showToast('❌ Delete failed: ' + e.message); }
 };
 
@@ -953,6 +1127,7 @@ window.removeFromExperiment = function(tankId, event) {
   const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
   if (idx !== -1) { experiments[idx].tankIds = currentExperiment.tankIds; experiments[idx].tankGroups = currentExperiment.tankGroups; }
   if (!demoMode) saveExpTankIds(currentExperiment.name, currentExperiment.tankIds, currentExperiment.tankGroups || {});
+  logChange('Experiment Tanks Removed', { line: currentExperiment.name }, `Removed: ${tankId}`);
   renderAll();
 };
 
@@ -1246,6 +1421,7 @@ window.confirmTankPicker = async function() {
   if (!currentExperiment) return;
   const btn = document.getElementById('picker-confirm-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const prevIds = currentExperiment.tankIds || [];
   currentExperiment.tankIds = [...pickerSelected];
   const idx = experiments.findIndex(e => e.gid === currentExperiment.gid);
   if (idx !== -1) experiments[idx].tankIds = currentExperiment.tankIds;
@@ -1253,15 +1429,24 @@ window.confirmTankPicker = async function() {
     try { await saveExpTankIds(currentExperiment.name, currentExperiment.tankIds, currentExperiment.tankGroups || {}); }
     catch(e) { showToast('❌ ' + e.message); if (btn) { btn.disabled = false; updatePickerBtn(); } return; }
   }
+  const addedIds   = currentExperiment.tankIds.filter(tid => !prevIds.includes(tid));
+  const removedIds = prevIds.filter(tid => !currentExperiment.tankIds.includes(tid));
+  if (addedIds.length || removedIds.length) {
+    logChange('Experiment Tanks Updated', { line: currentExperiment.name }, [
+      addedIds.length   ? `Added: ${addedIds.join(', ')}`     : null,
+      removedIds.length ? `Removed: ${removedIds.join(', ')}` : null,
+    ].filter(Boolean).join(' | '));
+  }
   closeTankPicker();
   renderAll();
-  renderExperimentsDropdown();
+  renderExperimentsListView();
   showToast(`✅ ${currentExperiment.tankIds.length} tanks saved`);
 };
 
 // ── Changelog ────────────────────────────────────────────────────────────────
 function diffRecord(oldRec, newRec) {
   const fields = [
+    { key: 'tankId',   label: 'Tank ID'    },
     { key: 'line',     label: 'Line'       },
     { key: 'age',      label: 'Fert. Date' },
     { key: 'count',    label: 'Count'      },
@@ -1291,6 +1476,15 @@ function diffRecord(oldRec, newRec) {
   if (!hadPhoto && hasPhoto)                                changes.push('Photo: added');
   else if (hadPhoto && !hasPhoto)                           changes.push('Photo: removed');
   else if (hadPhoto && hasPhoto && oldRec.photoUrl !== newRec.photoUrl) changes.push('Photo: replaced');
+  // Lineage link (offspring-of-cross)
+  const oldCross = oldRec.crossOrigin || '';
+  const newCross = newRec.crossOrigin || '';
+  if (oldCross !== newCross) {
+    const label = id => { const c = crosses.find(x => x.id === id); return c ? crossLabel(c) : id; };
+    if (!oldCross)      changes.push(`Lineage: linked to cross "${label(newCross)}"`);
+    else if (!newCross) changes.push(`Lineage: unlinked from cross "${label(oldCross)}"`);
+    else                changes.push(`Lineage: "${label(oldCross)}" → "${label(newCross)}"`);
+  }
   return changes.length ? changes.join(' | ') : 'No changes';
 }
 
@@ -1360,10 +1554,23 @@ function normalizePhotoUrl(url) {
   return id ? `https://lh3.googleusercontent.com/d/${id}=w800` : url;
 }
 
+// Returns true only if the file is actually gone from Drive (or never existed) —
+// callers use this to avoid dropping a photo reference when the delete silently failed.
 async function deleteDrivePhoto(photoUrl) {
   const id = extractDriveFileId(photoUrl);
-  if (!id || demoMode) return;
-  try { await authFetch(`https://www.googleapis.com/drive/v3/files/${id}`, { method: 'DELETE' }); } catch(e) {}
+  if (!id) return true;
+  if (demoMode) return true;
+  try {
+    const res = await authFetch(`https://www.googleapis.com/drive/v3/files/${id}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) {
+      console.warn('deleteDrivePhoto failed:', id, res.status);
+      return false;
+    }
+    return true;
+  } catch(e) {
+    console.warn('deleteDrivePhoto error:', e.message);
+    return false;
+  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -1392,6 +1599,14 @@ function parseDateInput(v) {
   const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return v;
   return m[3] + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+}
+// True only for a fully-formed, real MM/DD/YYYY calendar date (rejects 02/30/2024, 13/01/2024, etc.)
+function isValidDateInput(v) {
+  const m = (v || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return false;
+  const month = +m[1], day = +m[2], year = +m[3];
+  const d = new Date(year, month - 1, day);
+  return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
 }
 // Auto-format date input as user types (inserts slashes)
 window.autoFormatDate = function(inp) {
@@ -1514,6 +1729,11 @@ window.filterFish = function() {
       if (activeDpfMin !== null && dpf < activeDpfMin) return false;
       if (activeDpfMax !== null && dpf > activeDpfMax) return false;
     }
+    if (groupFilterColor && currentExperiment) {
+      const g = currentExperiment.tankGroups?.[f.tankId] || null;
+      const want = groupFilterColor === 'none' ? null : groupFilterColor;
+      if (g !== want) return false;
+    }
     if (!q) return true;
     return parseSearchTerms(q).every(term => matchSearchTerm(f, term));
   });
@@ -1540,44 +1760,15 @@ window.toggleSortDir = function() {
   sortFish();
 };
 
-const GROUP_COLOR_ORDER = { green: 0, red: 1, blue: 2, yellow: 3 };
-const GROUP_COLOR_LABELS = { green: '🟢 Green', red: '🔴 Red', blue: '🔵 Blue', yellow: '🟡 Yellow' };
-
 function renderGrid() {
   const grid  = document.getElementById('fish-grid');
   const empty = document.getElementById('empty-state');
-  // Remove cards AND group headers from previous render
+  // Remove cards from previous render
   Array.from(grid.children).forEach(c => { if (c !== empty) c.remove(); });
   if (filtered.length === 0) { empty.style.display = 'flex'; return; }
   empty.style.display = 'none';
 
-  // When groupByColor is active inside an experiment, stable-sort filtered
-  // by color (preserves the existing within-group sort order).
-  if (groupByColor && currentExperiment) {
-    filtered.sort((a, b) => {
-      const ac = GROUP_COLOR_ORDER[currentExperiment.tankGroups?.[a.tankId]] ?? 99;
-      const bc = GROUP_COLOR_ORDER[currentExperiment.tankGroups?.[b.tankId]] ?? 99;
-      return ac - bc;
-    });
-  }
-
-  let lastColor = undefined; // sentinel — tracks when the group changes
-
   filtered.forEach((f, idx) => {
-    // Insert a section header whenever the color group changes (only in group mode)
-    if (groupByColor && currentExperiment) {
-      const color = currentExperiment.tankGroups?.[f.tankId] || null;
-      if (color !== lastColor) {
-        lastColor = color;
-        const hdr = document.createElement('div');
-        hdr.className = `exp-group-header${color ? ` exp-group-header-${color}` : ' exp-group-header-none'}`;
-        hdr.innerHTML = color
-          ? `<span class="exp-group-hdr-dot"></span>${GROUP_COLOR_LABELS[color]}`
-          : `<span class="exp-group-hdr-dot"></span>Ungrouped`;
-        grid.appendChild(hdr);
-      }
-    }
-
     const card    = document.createElement('div');
     const isSel   = selectionMode && selectedTankIds.has(f.id);
     const groupColor = currentExperiment?.tankGroups?.[f.tankId] || null;
@@ -1759,8 +1950,10 @@ document.addEventListener('click', e => {
     const ddId = id === 'pos-filter-wrap' ? 'pos-dropdown' : id === 'neg-filter-wrap' ? 'neg-dropdown' : 'unsorted-dropdown';
     if (wrap && !wrap.contains(e.target)) document.getElementById(ddId)?.classList.add('hidden');
   });
-  const expWrap = document.getElementById('exp-btn-wrap') || document.querySelector('.exp-btn-wrap');
-  if (expWrap && !expWrap.contains(e.target)) closeExperimentsDropdown();
+  const navWrap = document.getElementById('nav-wrap');
+  if (navWrap && !navWrap.contains(e.target)) closeNavMenu();
+  const groupWrap = document.getElementById('group-color-btn')?.closest('.exp-group-wrap');
+  if (groupWrap && !groupWrap.contains(e.target)) document.getElementById('group-assign-menu')?.classList.add('hidden');
   if (!e.target.closest('#picker-pos-btn')) document.getElementById('picker-pos-dd')?.classList.add('hidden');
   if (!e.target.closest('#picker-neg-btn')) document.getElementById('picker-neg-dd')?.classList.add('hidden');
 });
@@ -2124,6 +2317,23 @@ window.syncLocToStatus = function() {
 window.checkLocationMigration = checkLocationMigration;
 window.checkUnsortedMigration = checkUnsortedMigration;
 
+// Find tank IDs currently shared by more than one tank — run manually via console
+window.checkDuplicateTankIds = function() {
+  const groups = {};
+  fishData.forEach(f => {
+    if (!f.tankId) return;
+    const key = f.tankId.toUpperCase();
+    (groups[key] ||= []).push(f);
+  });
+  const dupes = Object.entries(groups).filter(([, list]) => list.length > 1);
+  if (!dupes.length) { console.log('✅ No duplicate tank IDs found.'); showToast('✅ No duplicate tank IDs found'); return; }
+  console.log(`⚠️ Found ${dupes.length} duplicated tank ID(s):`);
+  dupes.forEach(([id, list]) => {
+    console.log(`  ${id} — used by ${list.length} tanks:`, list.map(f => ({ id: f.id, line: f.line, location: f.location, status: f.status })));
+  });
+  showToast(`⚠️ ${dupes.length} duplicate tank ID(s) — see console`);
+};
+
 // ── Location migration wizard ─────────────────────────────────────────────────
 function checkLocationMigration() {
   if (demoMode) return;
@@ -2349,17 +2559,42 @@ function renderLastLocation() {
   el.innerHTML = `<button type="button" class="recent-line-pill" onclick="setLocInForm('${esc(loc)}');updateLocPreview();syncLocToStatus()">Last: ${esc(loc)}</button>`;
 }
 
+// ── Lineage field (Add/Edit Tank form) ────────────────────────────────────────
+function renderCrossOriginOptions(selectedId) {
+  const sel = document.getElementById('f-cross-origin');
+  if (!sel) return;
+  const sorted = [...crosses].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  sel.innerHTML = '<option value="">— Not linked to a cross —</option>' + sorted.map(c =>
+    `<option value="${esc(c.id)}">${esc(crossLabel(c))} — ${esc(formatDate(c.date))}${c.status !== 'active' ? ` (${esc(c.status)})` : ''}</option>`
+  ).join('');
+  sel.value = selectedId || '';
+}
+
+window.onCrossOriginChange = function() {
+  const crossId = document.getElementById('f-cross-origin')?.value || '';
+  const cross   = crossId ? crosses.find(c => c.id === crossId) : null;
+  const note    = document.getElementById('offspring-cross-note');
+  if (cross) {
+    if (note) { note.textContent = `🧬 Linking to cross: ${crossLabel(cross)}`; note.classList.remove('hidden'); }
+    document.getElementById('save-add-another-btn')?.classList.toggle('hidden', !!editingId);
+  } else {
+    note?.classList.add('hidden');
+    document.getElementById('save-add-another-btn')?.classList.add('hidden');
+  }
+};
+
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
 window.openAddModal = function() {
   editingId = null; currentMarkers = []; currentNegMarkers = []; currentUnsortedMarkers = [];
   currentPhotoUrl = null; originalPhotoUrl = null; pendingPhotoFile = null;
   currentThumbPos = '50% 15%';
-  offspringCrossId = null;
   document.getElementById('save-add-another-btn')?.classList.add('hidden');
   document.getElementById('offspring-cross-note')?.classList.add('hidden');
   document.getElementById('modal-title').textContent = 'Add Tank';
   document.getElementById('fish-form').reset();
   document.getElementById('f-tank-id').value             = '';
+  document.getElementById('tank-id-hint').style.display  = 'none';
+  document.getElementById('f-age-hint').style.display    = 'none';
   document.getElementById('markers-container').innerHTML     = '';
   document.getElementById('neg-markers-container').innerHTML = '';
   document.getElementById('unsorted-markers-container').innerHTML = '';
@@ -2368,6 +2603,7 @@ window.openAddModal = function() {
   resetPhotoUI();
   renderRecentLines();
   renderLastLocation();
+  renderCrossOriginOptions('');
   // Reset split mode
   splitMode = false;
   document.getElementById('split-tag-btn')?.classList.remove('active');
@@ -2386,6 +2622,8 @@ window.openEditModal = function(id) {
   currentPhotoUrl = f.photoUrl || null; originalPhotoUrl = f.photoUrl || null; pendingPhotoFile = null;
   currentThumbPos = f.thumbPos || '50% 15%';
   document.getElementById('modal-title').textContent = 'Edit Tank';
+  document.getElementById('tank-id-hint').style.display = 'none';
+  document.getElementById('f-age-hint').style.display   = 'none';
   document.getElementById('f-tank-id').value  = f.tankId || f.id || '';
   document.getElementById('f-line').value     = f.line;
   document.getElementById('f-age').value      = toDateInput(f.age);
@@ -2399,6 +2637,8 @@ window.openEditModal = function(id) {
   if (currentPhotoUrl) showPhotoPreview(currentPhotoUrl);
   renderRecentLines();
   renderLastLocation();
+  renderCrossOriginOptions(f.crossOrigin || '');
+  window.onCrossOriginChange();
   // Restore split mode if tank has a temp SPL-ID
   splitMode = /^SPL-/i.test(f.tankId || '');
   const splitBtn  = document.getElementById('split-tag-btn');
@@ -2424,6 +2664,8 @@ window.duplicateFish = function(id) {
   pendingPhotoFile      = null;
   currentThumbPos       = '50% 15%';
   document.getElementById('modal-title').textContent = 'Duplicate Tank';
+  document.getElementById('tank-id-hint').style.display = 'none';
+  document.getElementById('f-age-hint').style.display   = 'none';
   document.getElementById('f-tank-id').value = '';
   document.getElementById('f-line').value    = f.line || '';
   document.getElementById('f-age').value     = toDateInput(f.age);
@@ -2436,13 +2678,27 @@ window.duplicateFish = function(id) {
   resetPhotoUI();
   renderRecentLines();
   renderLastLocation();
+  // Reset split mode (tank ID was just cleared above, so it can't be a temp SPL-ID)
+  splitMode = false;
+  document.getElementById('split-tag-btn')?.classList.remove('active');
+  document.getElementById('split-tag-hint')?.classList.add('hidden');
+
+  // If this tank was itself recorded offspring, carry the cross link forward so the
+  // duplicate is still tied to the same cross (and "Save & Add Another" stays available)
+  const cross = f.crossOrigin ? crosses.find(x => x.id === f.crossOrigin) : null;
+  renderCrossOriginOptions(cross ? cross.id : '');
+  window.onCrossOriginChange();
+  if (cross) {
+    const parentTxt = cross.incross ? `${cross.parent1} (incross)` : `${cross.parent1} × ${cross.parent2}`;
+    document.getElementById('f-notes').value = `Offspring of ${parentTxt}`;
+  }
+
   document.getElementById('fish-modal').classList.add('active');
   checkScrollLock();
 };
 
 window.closeModal = function() {
   document.getElementById('fish-modal').classList.remove('active');
-  offspringCrossId = null;
   document.getElementById('save-add-another-btn')?.classList.add('hidden');
   document.getElementById('offspring-cross-note')?.classList.add('hidden');
   document.getElementById('pos-picker-dropdown')?.classList.add('hidden');
@@ -2525,6 +2781,31 @@ window.removePhoto = function() {
 
 window.saveFishAddAnother = function() { return saveFish({ preventDefault(){} }, true); };
 
+// ── Duplicate Tank ID dialog ──────────────────────────────────────────────────
+let dupIdResolver = null;
+function showDupIdDialog(rawId, duplicate) {
+  return new Promise(resolve => {
+    dupIdResolver = resolve;
+    const msg = document.getElementById('dup-id-message');
+    if (msg) msg.textContent = `Tank ID ${rawId} is already used by "${duplicate.line || duplicate.id}".`;
+    document.getElementById('dup-id-overlay')?.classList.add('active');
+    checkScrollLock();
+  });
+}
+window.resolveDupId = function(action) {
+  document.getElementById('dup-id-overlay')?.classList.remove('active');
+  checkScrollLock();
+  if (dupIdResolver) { dupIdResolver(action); dupIdResolver = null; }
+};
+
+// ── Live fertilization-date validation (Add/Edit Tank form) ──────────────────
+window.validateAgeInput = function() {
+  const val  = document.getElementById('f-age')?.value.trim() || '';
+  const hint = document.getElementById('f-age-hint');
+  if (!hint) return;
+  hint.style.display = (val && !isValidDateInput(val)) ? '' : 'none';
+};
+
 window.saveFish = async function(e, addAnother) {
   e.preventDefault();
   const saveBtn = document.getElementById('save-btn');
@@ -2540,13 +2821,30 @@ window.saveFish = async function(e, addAnother) {
   }
   if (hint) hint.style.display = 'none';
 
-  // Block save if this tank ID is already used by a different tank
+  // Fertilization date, if entered, must be a fully-formed, real MM/DD/YYYY date
+  const rawAge = document.getElementById('f-age').value.trim();
+  if (rawAge && !isValidDateInput(rawAge)) {
+    showToast('⚠️ Fertilization date must be a valid MM/DD/YYYY date');
+    document.getElementById('f-age').focus();
+    return;
+  }
+
+  // Tank ID already used by a different tank — offer to save with a suffix + reminder, or cancel
+  let dupSuffixApplied = false;
   if (rawId) {
     const duplicate = fishData.find(f => f.tankId && f.tankId.toUpperCase() === rawId && f.id !== (editingId || ''));
     if (duplicate) {
-      showToast(`⚠️ Tank ID ${rawId} is already used by "${duplicate.line || duplicate.id}"`);
-      document.getElementById('f-tank-id').focus();
-      return;
+      const action = await showDupIdDialog(rawId, duplicate);
+      if (action !== 'suffix') {
+        document.getElementById('f-tank-id').focus();
+        return;
+      }
+      const enteredRaw = document.getElementById('f-tank-id').value.trim();
+      let n = 1, suffixed;
+      do { suffixed = `${enteredRaw}-${n}`; n++; }
+      while (fishData.some(f => f.tankId && f.tankId.toUpperCase() === suffixed.toUpperCase() && f.id !== (editingId || '')));
+      document.getElementById('f-tank-id').value = suffixed;
+      dupSuffixApplied = true;
     }
   }
 
@@ -2564,6 +2862,8 @@ window.saveFish = async function(e, addAnother) {
   const fallbackId = editingId
     ? (fishData.find(x => x.id === editingId)?.tankId || editingId)
     : `tank-${Date.now()}`;
+  const oldCrossOrigin = editingId ? (fishData.find(x => x.id === editingId)?.crossOrigin || '') : '';
+  const newCrossOrigin = document.getElementById('f-cross-origin')?.value || '';
   const record = {
     tankId:     enteredId || fallbackId,
     line:       document.getElementById('f-line').value.trim(),
@@ -2576,7 +2876,7 @@ window.saveFish = async function(e, addAnother) {
     status:     document.querySelector('input[name="status"]:checked')?.value || 'Active',
     notes:      document.getElementById('f-notes').value.trim(),
     photoUrl, thumbPos: currentThumbPos,
-    crossOrigin: offspringCrossId || (editingId ? (fishData.find(x => x.id === editingId)?.crossOrigin || '') : ''),
+    crossOrigin: newCrossOrigin,
     updated: new Date().toISOString().slice(0, 16).replace('T', ' '),
   };
   record.id = record.tankId;
@@ -2600,6 +2900,7 @@ window.saveFish = async function(e, addAnother) {
     if (!demoMode) {
       const rowIndex = await appendToSheets(record);
       record._rowIndex = rowIndex || fishData.length + 2;
+      const originCross = record.crossOrigin ? crosses.find(x => x.id === record.crossOrigin) : null;
       const addDetails = [
         `Line: ${record.line}`,
         `Status: ${record.status}`,
@@ -2608,6 +2909,7 @@ window.saveFish = async function(e, addAnother) {
         (record.markers    ||[]).length ? `+Markers: [${record.markers.join(', ')}]`    : null,
         (record.negMarkers ||[]).length ? `−Markers: [${record.negMarkers.join(', ')}]` : null,
         record.photoUrl ? 'Photo: added' : null,
+        originCross ? `Offspring of cross: ${crossLabel(originCross)}` : null,
       ].filter(Boolean).join(' | ');
       logChange('Added', record, addDetails);
     } else {
@@ -2631,25 +2933,36 @@ window.saveFish = async function(e, addAnother) {
   if (document.getElementById('f-baffle-remind')?.checked) {
     await createAlert('baffle-remove', record);
   }
+  // Alert: tank was saved with a suffixed duplicate ID — remind to fix it in 7 days
+  if (dupSuffixApplied) {
+    await createAlert('duplicate-id', record);
+  }
   // Auto-dismiss ID alerts when tank gets a real C+8 barcode
   if (editingId && /^C\d{8}$/.test(record.tankId)) {
     if (/^SPL-/i.test(editingId)) await dismissAlertsForTank(editingId, 'split-id');
     await dismissAlertsForTank(editingId, 'nursery-id');
   }
+  // Auto-dismiss duplicate-id alert once the tank's ID no longer collides with another tank
+  if (editingId) {
+    const stillDuplicate = fishData.some(f => f.tankId && f.tankId.toUpperCase() === record.tankId.toUpperCase() && f.id !== record.id);
+    if (!stillDuplicate) await dismissAlertsForTank(editingId, 'duplicate-id');
+  }
 
-  // Offspring recording: link this tank back to its cross and mark it complete
-  if (offspringCrossId && !editingId) {
-    await attachOffspringToCross(offspringCrossId, record.tankId);
-    if (addAnother) {
-      invalidateMarkerFreq();
-      renderAll();
-      prepNextOffspring();   // keep modal open, ready for the next tank
-      return;
-    }
+  // Lineage: sync cross offspring lists if the linked cross changed (set via the
+  // Lineage field — new tanks recording offspring, edits changing/clearing the link,
+  // or duplicates carrying a link forward all flow through here the same way)
+  if (newCrossOrigin !== oldCrossOrigin) {
+    if (oldCrossOrigin) await detachOffspringFromCross(oldCrossOrigin, editingId);
+    if (newCrossOrigin) await attachOffspringToCross(newCrossOrigin, record.tankId);
+  }
+  if (newCrossOrigin && !editingId && addAnother) {
+    invalidateMarkerFreq();
+    renderAll();
+    prepNextOffspring();   // keep modal open, ready for the next tank
+    return;
   }
 
   invalidateMarkerFreq();
-  offspringCrossId = null;
   closeModal(); renderAll();
 };
 
@@ -2890,7 +3203,7 @@ window.toggleTankInExperiment = async function(tankId, expIdx) {
   // Re-render just the exp section inside the drawer
   const el = document.getElementById(`exp-membership-${expIdx}`);
   if (el) el.classList.toggle('exp-member-active', exp.tankIds.includes(tankId));
-  renderExperimentsDropdown();
+  renderExperimentsListView();
   if (currentExperiment) renderAll();
 };
 
@@ -3010,6 +3323,38 @@ window.filterGuide = function(q) {
   if (clearBtn) clearBtn.classList.toggle('hidden', !term);
   const noRes = document.getElementById('guide-no-results');
   if (noRes) noRes.style.display = (!term || anyMatch) ? 'none' : '';
+};
+
+// ── DPF calculator (help guide) ────────────────────────────────────────────────
+// Same day-0-is-fertilization-date rule as calcDpf(), generalized to two arbitrary dates.
+window.runDpfCalculator = function() {
+  const result = document.getElementById('dpf-calc-result');
+  if (!result) return;
+  const raw1 = document.getElementById('dpf-calc-date1')?.value.trim() || '';
+  const raw2 = document.getElementById('dpf-calc-date2')?.value.trim() || '';
+  result.classList.remove('dpf-calc-negative');
+  if (!raw1) { result.textContent = 'Enter a fertilization date to calculate dpf.'; return; }
+
+  if (!isValidDateInput(raw1)) { result.textContent = '⚠️ First date isn\'t valid — use MM/DD/YYYY.'; return; }
+  const d1Str = parseDateInput(raw1);
+  const d1 = new Date(d1Str + 'T00:00:00');
+
+  let d2, d2Label;
+  if (raw2) {
+    if (!isValidDateInput(raw2)) { result.textContent = '⚠️ Second date isn\'t valid — use MM/DD/YYYY.'; return; }
+    const d2Str = parseDateInput(raw2);
+    d2 = new Date(d2Str + 'T00:00:00');
+    d2Label = formatDate(d2Str);
+  } else {
+    d2 = new Date(); d2.setHours(0, 0, 0, 0);
+    d2Label = 'today';
+  }
+
+  const dpf = Math.round((d2 - d1) / 86400000);
+  result.classList.toggle('dpf-calc-negative', dpf < 0);
+  result.innerHTML = dpf < 0
+    ? `<strong>${dpf}</strong> dpf — ${esc(d2Label)} is <em>before</em> the fertilization date`
+    : `<strong>${dpf}</strong> dpf as of ${esc(d2Label)}`;
 };
 
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
@@ -3154,6 +3499,39 @@ window.copyToClip = function(text, label) {
   });
 };
 
+// ── CSV export ────────────────────────────────────────────────────────────────
+function csvEscape(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function tanksToCSV(tanks) {
+  const headers = ['Tank ID', 'Line', 'Fert. Date', 'DPF', 'Count', 'Location', 'Status', '+Markers', '-Markers', '?Markers', 'Notes'];
+  const rows = tanks.map(f => [
+    f.tankId || '', f.line || '',
+    f.age ? formatDate(f.age) : '', f.age ? calcDpf(f.age) : '',
+    f.count || 0, f.location || '', f.status || '',
+    (f.markers || []).join('; '), (f.negMarkers || []).join('; '), (f.unsorted || []).join('; '),
+    f.notes || '',
+  ]);
+  return [headers, ...rows].map(r => r.map(csvEscape).join(',')).join('\r\n');
+}
+
+// Exports whatever's currently visible — the full inventory, or just the current
+// experiment's tanks when inside one — respecting any active search/filters
+window.exportVisibleTanksCSV = function() {
+  if (!filtered.length) { showToast('⚠️ No tanks to export'); return; }
+  const csv  = tanksToCSV(filtered);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const name = currentExperiment ? currentExperiment.name.replace(/[^a-z0-9_-]+/gi, '_') : 'fzfish-inventory';
+  const a = document.createElement('a');
+  a.href = url; a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast(`📤 Exported ${filtered.length} tank${filtered.length > 1 ? 's' : ''} to CSV`);
+};
+
 // ── Alert system ─────────────────────────────────────────────────────────────
 // Alerts are stored as a single JSON blob in changelog!Z1 — a far-off cell
 // that changelog append rows (columns A–F) never reach.  No new tab needed.
@@ -3182,12 +3560,107 @@ async function saveAlerts(alerts) {
   } catch(e) { console.warn('saveAlerts:', e.message); }
 }
 
+// ── Google Calendar sync ──────────────────────────────────────────────────────
+// Alerts sync to ONE shared Google Calendar (GCAL_ID above) — not a personal one.
+// There's no per-person write toggle: as long as GCAL_ID is configured and you're
+// signed in for real, whichever account happens to be logged in pushes/removes
+// events automatically as alerts are created, dismissed, or snoozed (this works for
+// anyone because the calendar is shared org-wide with edit access — see README).
+// "Subscribing" is a separate, per-person opt-in: clicking the Subscribe button just
+// adds the shared calendar to *that person's own* Google Calendar view (read-only,
+// no permissions granted) — it has nothing to do with who can push events.
+// Each event's title ends with the email of whoever's account created it, so the
+// team can tell who pushed it. See README "Setting up Google Calendar Sync".
+
+function calendarSyncEnabled() {
+  return !demoMode && !!GCAL_ID;
+}
+
+// Opens Google Calendar's "add this calendar" flow for the signed-in viewer —
+// a personal, read-only opt-in that never touches write permissions.
+window.subscribeToAlertsCalendar = function() {
+  if (!GCAL_ID) { showToast('⚠️ Calendar sync isn\'t set up yet — see README'); return; }
+  window.open(`https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(GCAL_ID)}`, '_blank', 'noopener');
+};
+
+// Creates a calendar event for any active/upcoming alert that doesn't have one yet —
+// runs automatically after sign-in/data load, and again as a safety net on panel open
+async function syncAllAlertsToCalendar() {
+  if (!calendarSyncEnabled()) return;
+  const alerts = await loadAlerts();
+  let changed = false;
+  for (const a of alerts) {
+    if (!a.dismissed && !a.calendarEventId) {
+      a.calendarEventId = await createCalendarEvent(a);
+      changed = true;
+    }
+  }
+  if (changed) await saveAlerts(alerts);
+}
+
+async function createCalendarEvent(alert) {
+  if (!calendarSyncEnabled()) return null;
+  const start   = new Date(alert.fireAt);
+  const end     = new Date(alert.fireAt + 30 * 60000);
+  const creator = currentUser || 'unknown user';
+  try {
+    const res = await authFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GCAL_ID)}/events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary: `🐟 FZFish: ${plainAlertMessage(alert)} — ${creator}`.slice(0, 200),
+        description: `${plainAlertMessage(alert)}\n\nAdded by: ${creator}\nOpen FZFish: https://marjvilla.github.io/FZFish/`,
+        start: { dateTime: start.toISOString() },
+        end:   { dateTime: end.toISOString() },
+        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 0 }] },
+      }),
+    });
+    const json = await res.json();
+    return json.id || null;
+  } catch(e) { console.warn('createCalendarEvent:', e.message); return null; }
+}
+
+async function deleteCalendarEvent(eventId) {
+  if (!eventId || !calendarSyncEnabled()) return;
+  try { await authFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GCAL_ID)}/events/${eventId}`, { method: 'DELETE' }); }
+  catch(e) { console.warn('deleteCalendarEvent:', e.message); }
+}
+
+// ── Custom user-created reminders ─────────────────────────────────────────────
+window.addCustomReminder = async function() {
+  const titleEl = document.getElementById('custom-reminder-title');
+  const dateEl  = document.getElementById('custom-reminder-date');
+  const timeEl  = document.getElementById('custom-reminder-time');
+  const title   = titleEl.value.trim();
+  const dateStr = parseDateInput(dateEl.value.trim());
+  const time    = timeEl.value || '09:00';
+  if (!title) { showToast('⚠️ Give the reminder a title'); return; }
+  if (!dateEl.value.trim() || !isValidDateInput(dateEl.value.trim())) { showToast('⚠️ Enter a valid date (MM/DD/YYYY)'); return; }
+  const fireAt = new Date(`${dateStr}T${time}:00`).getTime();
+  if (isNaN(fireAt)) { showToast('⚠️ Invalid date/time'); return; }
+
+  const alert = {
+    id: 'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    type: 'custom', title, tankInternalId: null, tankLine: '', tankLocation: '',
+    createdAt: Date.now(), fireAt, snoozedUntil: null, dismissed: false,
+    createdBy: currentUser || '',
+  };
+  if (calendarSyncEnabled()) alert.calendarEventId = await createCalendarEvent(alert);
+
+  const alerts = await loadAlerts();
+  alerts.push(alert);
+  await saveAlerts(alerts);
+  titleEl.value = ''; dateEl.value = ''; timeEl.value = '';
+  renderAlertBadge();
+  buildAlertPanel();
+  showToast('✅ Reminder added');
+};
+
 // ── Alert CRUD ────────────────────────────────────────────────────────────────
 async function createAlert(type, fish) {
-  const days   = type === 'baffle-remove' ? 7 : 3;
+  const days   = (type === 'baffle-remove' || type === 'duplicate-id') ? 7 : 3;
   const alerts = await loadAlerts();
   if (alerts.some(a => !a.dismissed && a.type === type && a.tankInternalId === fish.id)) return;
-  alerts.push({
+  const alert = {
     id:             'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
     type,
     tankInternalId: fish.id,
@@ -3198,32 +3671,50 @@ async function createAlert(type, fish) {
     snoozedUntil:   null,
     dismissed:      false,
     createdBy:      currentUser || '',
-  });
+  };
+  if (calendarSyncEnabled()) alert.calendarEventId = await createCalendarEvent(alert);
+  alerts.push(alert);
   await saveAlerts(alerts);
   renderAlertBadge();
 }
 
 window.dismissAlert = async function(id) {
-  const alerts = (await loadAlerts()).map(a => a.id === id ? { ...a, dismissed: true } : a);
-  await saveAlerts(alerts);
+  const alerts = await loadAlerts();
+  const target = alerts.find(a => a.id === id);
+  if (target?.calendarEventId) await deleteCalendarEvent(target.calendarEventId);
+  const updated = alerts.map(a => a.id === id ? { ...a, dismissed: true } : a);
+  await saveAlerts(updated);
   renderAlertBadge();
   buildAlertPanel();
 };
 
 async function dismissAlertsForTank(tankInternalId, type) {
-  const alerts = (await loadAlerts()).map(a =>
+  const alerts = await loadAlerts();
+  for (const a of alerts) {
+    if (a.tankInternalId === tankInternalId && (!type || a.type === type) && a.calendarEventId) {
+      await deleteCalendarEvent(a.calendarEventId);
+    }
+  }
+  const updated = alerts.map(a =>
     a.tankInternalId === tankInternalId && (!type || a.type === type)
       ? { ...a, dismissed: true } : a
   );
-  await saveAlerts(alerts);
+  await saveAlerts(updated);
   renderAlertBadge();
 }
 
 window.snoozeAlert = async function(id) {
-  const alerts = (await loadAlerts()).map(a =>
-    a.id === id ? { ...a, snoozedUntil: Date.now() + 60 * 60 * 1000 } : a
-  );
-  await saveAlerts(alerts);
+  const alerts  = await loadAlerts();
+  const target  = alerts.find(a => a.id === id);
+  const snoozedUntil = Date.now() + 60 * 60 * 1000;
+  let calendarEventId = target?.calendarEventId || null;
+  if (calendarEventId) {
+    // Re-create the event at the new time rather than leaving a stale one an hour early
+    await deleteCalendarEvent(calendarEventId);
+    calendarEventId = calendarSyncEnabled() ? await createCalendarEvent({ ...target, fireAt: snoozedUntil }) : null;
+  }
+  const updated = alerts.map(a => a.id === id ? { ...a, snoozedUntil, calendarEventId } : a);
+  await saveAlerts(updated);
   renderAlertBadge();
   buildAlertPanel();
 };
@@ -3257,12 +3748,24 @@ async function renderAlertBadge() {
   });
 }
 
+const ALERT_TYPE_LABELS = {
+  'split-id':          'temp ID to fix',
+  'nursery-id':        'nursery barcode needed',
+  'baffle-remove':     'baffle removal',
+  'breeding-followup': 'cross follow-up',
+  'duplicate-id':      'duplicate Tank ID',
+};
+
+// One-time digest shown right after sign-in — breaks the count down by type so
+// it's a useful summary at a glance, not just a bare number
 async function checkAlerts() {
   await renderAlertBadge();
   const active = await getActiveAlerts();
-  if (active.length > 0) {
-    showToast(`🔔 ${active.length} alert${active.length > 1 ? 's' : ''} need attention`);
-  }
+  if (!active.length) return;
+  const counts = {};
+  active.forEach(a => { counts[a.type] = (counts[a.type] || 0) + 1; });
+  const parts = Object.entries(counts).map(([type, n]) => `${n} ${ALERT_TYPE_LABELS[type] || type}`);
+  showToast(`🔔 ${active.length} alert${active.length > 1 ? 's' : ''}: ${parts.join(', ')}`);
 }
 
 function alertMessage(a) {
@@ -3278,7 +3781,17 @@ function alertMessage(a) {
   if (a.type === 'breeding-followup') {
     return `Record offspring for cross: <strong>${esc(a.tankLine || '?')}</strong>`;
   }
+  if (a.type === 'duplicate-id') {
+    const tankId = fish?.tankId || '';
+    return `Give this tank a unique Tank ID: <strong>${esc(line)}</strong>${tankId ? ` (${esc(tankId)})` : ''} at ${esc(loc)}`;
+  }
+  if (a.type === 'custom') return esc(a.title || 'Reminder');
   return esc(a.type);
+}
+
+// Plain-text version of alertMessage (no HTML) — used in Calendar event descriptions
+function plainAlertMessage(a) {
+  return alertMessage(a).replace(/<[^>]+>/g, '');
 }
 
 function formatAlertDate(ts) {
@@ -3314,6 +3827,7 @@ window.openAlertPanel = async function() {
   if (body) body.innerHTML = '<p class="alert-empty">Loading…</p>';
   document.getElementById('alert-overlay').classList.add('active');
   checkScrollLock();
+  if (calendarSyncEnabled()) await syncAllAlertsToCalendar(); // safety net for alerts created since last sync
   await buildAlertPanel();
 };
 
@@ -3321,6 +3835,49 @@ window.closeAlertPanel = function() {
   document.getElementById('alert-overlay')?.classList.remove('active');
   checkScrollLock();
 };
+
+// ── Recent Activity panel (read-only changelog viewer) ───────────────────────
+window.openActivityPanel = async function() {
+  const body = document.getElementById('activity-panel-body');
+  if (body) body.innerHTML = '<p class="alert-empty">Loading…</p>';
+  document.getElementById('activity-overlay').classList.add('active');
+  checkScrollLock();
+  if (demoMode) {
+    body.innerHTML = '<p class="alert-empty">Activity history isn\'t tracked in demo mode.</p>';
+    return;
+  }
+  try {
+    const r = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/changelog!A:F`);
+    const d = await r.json();
+    // Keep only rows whose first cell parses as a date (skips any header row)
+    const rows = (d.values || []).filter(row => row[0] && !isNaN(new Date(row[0]))).slice(-100).reverse();
+    if (!rows.length) { body.innerHTML = '<p class="alert-empty">No activity recorded yet.</p>'; return; }
+    body.innerHTML = rows.map(([ts, action, tankId, line, user, details]) => {
+      const who = (user || '').split('@')[0] || 'unknown';
+      return `<div class="activity-item">
+        <div class="activity-top">
+          <span class="activity-action">${esc(action)}</span>
+          <span class="activity-when">${esc(formatActivityTime(ts))}</span>
+        </div>
+        <div class="activity-target">${esc(line || tankId || '')}${line && tankId ? ` <span class="activity-id">(${esc(tankId)})</span>` : ''}</div>
+        ${details ? `<div class="activity-details">${esc(details)}</div>` : ''}
+        <div class="activity-user">by ${esc(who)}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<p class="alert-empty">Couldn\'t load activity — check your connection and try again.</p>';
+  }
+};
+window.closeActivityPanel = function() {
+  document.getElementById('activity-overlay')?.classList.remove('active');
+  checkScrollLock();
+};
+function formatActivityTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    + ' · ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
 
 async function buildAlertPanel() {
   const body = document.getElementById('alert-panel-body');
@@ -3514,8 +4071,12 @@ async function cleanupExpiredCrossPhotos() {
     if (c.photos?.length && c.photoExpires) {
       const exp = new Date(c.photoExpires + 'T00:00:00');
       if (!isNaN(exp) && exp < today) {
-        for (const url of c.photos) { await deleteDrivePhoto(url); }
-        c.photos = []; c.photoExpires = '';
+        // Only drop photos that were actually deleted from Drive — anything that
+        // failed stays on the cross so cleanup retries it next time the app loads
+        const remaining = [];
+        for (const url of c.photos) { if (!(await deleteDrivePhoto(url))) remaining.push(url); }
+        c.photos = remaining;
+        if (!remaining.length) c.photoExpires = '';
         try { await saveCross(c); } catch(e) {}
       }
     }
@@ -3533,16 +4094,15 @@ function crossesDueCount() {
 }
 function renderCrossBadge() {
   const due = crossesDueCount();
-  ['crosses-btn', 'mob-crosses-btn'].forEach(id => {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    let badge = btn.querySelector('.alert-badge');
+  const btn = document.getElementById('nav-lineage');
+  if (btn) {
+    let badge = btn.querySelector('.nav-badge');
     if (due > 0) {
-      if (!badge) { badge = document.createElement('span'); badge.className = 'alert-badge'; btn.appendChild(badge); }
+      if (!badge) { badge = document.createElement('span'); badge.className = 'nav-badge'; btn.appendChild(badge); }
       badge.textContent = due;
       btn.classList.add('has-alerts');
     } else { badge?.remove(); btn.classList.remove('has-alerts'); }
-  });
+  }
 }
 
 // ── Breeding follow-up alert ──────────────────────────────────────────────────
@@ -3571,17 +4131,69 @@ async function dismissBreedingAlert(crossId) {
   renderAlertBadge();
 }
 
-// ── Crosses panel ─────────────────────────────────────────────────────────────
-window.openCrossesPanel = function() {
-  document.getElementById('crosses-overlay').classList.add('active');
-  checkScrollLock();
-  buildCrossesPanel();
+// ── Top-level nav menu (fish logo → Inventory / Lineage / Experiments / Guide) ──
+window.toggleNavMenu = function(e) {
+  e?.stopPropagation();
+  document.getElementById('nav-dropdown')?.classList.toggle('hidden');
 };
-window.closeCrossesPanel = function() {
-  document.getElementById('crosses-overlay')?.classList.remove('active');
-  checkScrollLock();
+window.closeNavMenu = function() {
+  document.getElementById('nav-dropdown')?.classList.add('hidden');
 };
 
+// ── Top-level tabs (Inventory / Breeding & Lineage / Experiments) ────────────
+let activeMainTab = 'inventory';
+
+function updateMainView() {
+  const inExpTab   = activeMainTab === 'experiments';
+  const showGrid   = activeMainTab === 'inventory' || (inExpTab && currentExperiment);
+  const showExpBar = inExpTab && currentExperiment;
+
+  document.getElementById('fish-grid')?.classList.toggle('hidden', !showGrid);
+  document.querySelector('.filter-panel')?.classList.toggle('hidden', !showGrid);
+  document.getElementById('filter-toggle-bar')?.classList.toggle('hidden', !showGrid);
+  document.getElementById('lineage-view')?.classList.toggle('hidden', activeMainTab !== 'lineage');
+  document.getElementById('experiments-view')?.classList.toggle('hidden', !(inExpTab && !currentExperiment));
+  document.getElementById('experiment-bar')?.classList.toggle('hidden', !showExpBar);
+  if (!showExpBar) {
+    document.getElementById('exp-notes-panel')?.classList.add('hidden');
+    document.getElementById('exp-notes-toggle-btn')?.classList.remove('active');
+  }
+
+  document.getElementById('nav-inventory')?.classList.toggle('active', activeMainTab === 'inventory');
+  document.getElementById('nav-lineage')?.classList.toggle('active', activeMainTab === 'lineage');
+  document.getElementById('nav-experiments')?.classList.toggle('active', activeMainTab === 'experiments');
+}
+
+window.switchMainTab = async function(tab) {
+  activeMainTab = tab;
+  if (tab === 'inventory' && currentExperiment) {
+    currentExperiment = null;
+    resetGroupFilter();
+  }
+  if (tab === 'lineage') buildCrossesPanel();
+  if (tab === 'experiments' && !currentExperiment) await openExperimentsTab();
+  updateMainView();
+  renderAll();
+};
+
+window.filterLineageSearch = function() {
+  const term    = (document.getElementById('lineage-search-input')?.value || '').trim().toLowerCase();
+  const results = document.getElementById('lineage-search-results');
+  if (!results) return;
+  if (!term) { results.classList.add('hidden'); results.innerHTML = ''; return; }
+  const matches = fishData.filter(f =>
+    (f.line || '').toLowerCase().includes(term) || (f.tankId || '').toLowerCase().includes(term)
+  ).slice(0, 20);
+  results.innerHTML = matches.length
+    ? matches.map(f => `<button type="button" class="lineage-search-item" onclick="openDrawer('${esc(f.tankId)}')">
+        <span class="lineage-search-line">${esc(f.line)}</span>
+        <span class="lineage-search-meta">${esc(f.tankId)}${f.location ? ' · ' + esc(f.location) : ''}</span>
+      </button>`).join('')
+    : '<p class="picker-empty">No tanks found.</p>';
+  results.classList.remove('hidden');
+};
+
+// ── Crosses panel ─────────────────────────────────────────────────────────────
 function crossCardHtml(c) {
   const setup   = formatDate(c.date);
   const dueTs   = new Date(c.date + 'T00:00:00').getTime() + (c.followupDays || 7) * 86400000;
@@ -3591,12 +4203,12 @@ function crossCardHtml(c) {
              : `<span class="cross-due">Follow-up due</span>`;
   const p1 = findTank(c.parent1), p2 = findTank(c.parent2);
   const parentChips = `
-    <span class="cross-parent-chip" onclick="closeCrossesPanel();openDrawer('${esc(c.parent1)}')">${esc(p1?.line || c.parent1)}</span>
+    <span class="cross-parent-chip" onclick="openDrawer('${esc(c.parent1)}')">${esc(p1?.line || c.parent1)}</span>
     ${c.incross ? '<span class="cross-x">incross</span>' :
-      `<span class="cross-x">×</span><span class="cross-parent-chip" onclick="closeCrossesPanel();openDrawer('${esc(c.parent2)}')">${esc(p2?.line || c.parent2)}</span>`}`;
+      `<span class="cross-x">×</span><span class="cross-parent-chip" onclick="openDrawer('${esc(c.parent2)}')">${esc(p2?.line || c.parent2)}</span>`}`;
   const photos = (c.photos || []).map(u => `<img class="cross-photo-thumb-img" src="${esc(u)}" onclick="openLightbox('${esc(u)}')">`).join('');
   const offspring = (c.offspring || []).length
-    ? `<div class="cross-offspring">Offspring: ${c.offspring.map(id => `<span class="cross-parent-chip" onclick="closeCrossesPanel();openDrawer('${esc(id)}')">${esc(findTank(id)?.line || id)}</span>`).join(' ')}</div>`
+    ? `<div class="cross-offspring">Offspring: ${c.offspring.map(id => `<span class="cross-parent-chip" onclick="openDrawer('${esc(id)}')">${esc(findTank(id)?.line || id)}</span>`).join(' ')}</div>`
     : '';
   return `<div class="cross-card cross-card-${c.status}">
     <div class="cross-card-top">
@@ -3604,7 +4216,7 @@ function crossCardHtml(c) {
       ${c.status === 'active' ? `<span class="cross-badge-days">${dueTxt}</span>` : `<span class="cross-status-tag">${esc(c.status)}</span>`}
     </div>
     <div class="cross-card-parents">${parentChips}</div>
-    <div class="cross-card-meta">Set up ${setup}</div>
+    <div class="cross-card-meta">Set up ${setup} · <span class="copy-field cross-id-copy" onclick="copyToClip('${esc(c.id)}','Cross ID')" title="Click to copy">${esc(c.id)}<span class="copy-icon">⎘</span></span></div>
     ${c.notes ? `<div class="cross-card-notes">${esc(c.notes)}</div>` : ''}
     ${photos ? `<div class="cross-photo-row">${photos}</div>` : ''}
     ${offspring}
@@ -3663,7 +4275,6 @@ window.openNewCross = function(prefillParent1) {
   newCrossPhotos     = [];
   removedCrossPhotos = [];
   crossChoosingSlot  = 0;
-  closeCrossesPanel();
   setCrossModalMode(false);
   document.getElementById('new-cross-overlay').classList.add('active');
   checkScrollLock();
@@ -3679,7 +4290,6 @@ window.openEditCross = function(crossId) {
   newCrossPhotos     = (c.photos || []).map(url => ({ url, existing: true }));
   removedCrossPhotos = [];
   crossChoosingSlot  = 0;
-  closeCrossesPanel();
   setCrossModalMode(true);
   document.getElementById('new-cross-overlay').classList.add('active');
   checkScrollLock();
@@ -3848,8 +4458,10 @@ window.saveNewCross = async function() {
   const today = new Date().toISOString().slice(0, 10);
 
   // Delete any existing photos the user removed
-  for (const url of removedCrossPhotos) { await deleteDrivePhoto(url); }
+  let failedRemovals = 0;
+  for (const url of removedCrossPhotos) { if (!(await deleteDrivePhoto(url))) failedRemovals++; }
   removedCrossPhotos = [];
+  if (failedRemovals) showToast(`⚠️ ${failedRemovals} removed photo${failedRemovals > 1 ? 's' : ''} couldn't be deleted from Drive`);
 
   // Keep already-uploaded photos; upload the newly-added pending ones
   const kept    = newCrossPhotos.filter(p => p.existing).map(p => p.url);
@@ -3891,7 +4503,9 @@ window.saveNewCross = async function() {
     closeNewCross();
     renderCrossBadge();
     renderAll();
-    openCrossesPanel();
+    buildCrossesPanel();
+    logChange('Cross Edited', { tankId: c.id, line: crossLabel(c) },
+      `Parents: ${c.parent1}${c.incross ? ' (incross)' : ' × ' + c.parent2} | Follow-up: ${days}d${notes ? ' | Notes: ' + notes : ''}`);
     showToast(`✅ Cross updated: ${crossLabel(c)}`);
     return;
   }
@@ -3924,6 +4538,9 @@ window.saveNewCross = async function() {
   closeNewCross();
   renderCrossBadge();
   renderAll();
+  buildCrossesPanel();
+  logChange('Cross Created', { tankId: cross.id, line: crossLabel(cross) },
+    `Parents: ${cross.parent1}${cross.incross ? ' (incross)' : ' × ' + cross.parent2} | Follow-up: ${days}d${photos.length ? ` | Photos: ${photos.length}` : ''}${notes ? ' | Notes: ' + notes : ''}`);
   showToast(`✅ Cross set up: ${crossLabel(cross)}`);
 };
 
@@ -3947,18 +4564,26 @@ window.completeCross = async function(crossId) {
   await dismissBreedingAlert(crossId);
   renderCrossBadge();
   buildCrossesPanel();
+  logChange('Cross Completed', { tankId: c.id, line: crossLabel(c) },
+    `Offspring recorded: ${(c.offspring || []).length ? c.offspring.join(', ') : 'none'}`);
 };
 window.cancelCross = async function(crossId) {
   if (!confirm('Cancel this cross? It will move to past crosses.')) return;
   const c = crosses.find(x => x.id === crossId);
   if (!c) return;
   c.status = 'cancelled';
-  for (const url of (c.photos || [])) { await deleteDrivePhoto(url); }
-  c.photos = []; c.photoExpires = '';
+  // Only drop photos that were actually deleted from Drive — keep anything that
+  // failed so it isn't silently orphaned (retried next cleanup pass)
+  const remaining = [];
+  for (const url of (c.photos || [])) { if (!(await deleteDrivePhoto(url))) remaining.push(url); }
+  c.photos = remaining;
+  if (!remaining.length) c.photoExpires = '';
   await saveCross(c);
   await dismissBreedingAlert(crossId);
   renderCrossBadge();
   buildCrossesPanel();
+  logChange('Cross Cancelled', { tankId: c.id, line: crossLabel(c) });
+  if (remaining.length) showToast(`⚠️ Cross cancelled, but ${remaining.length} photo${remaining.length > 1 ? 's' : ''} couldn't be deleted — will retry later`);
 };
 
 window.addCrossPhotos = async function(crossId, input) {
@@ -3976,6 +4601,7 @@ window.addCrossPhotos = async function(crossId, input) {
     if (!c.photoExpires) c.photoExpires = addDays(c.date, 3);
     await saveCross(c);
     buildCrossesPanel();
+    logChange('Cross Photo Added', { tankId: c.id, line: crossLabel(c) }, `${files.length} photo${files.length > 1 ? 's' : ''}`);
     showToast('✅ Photo added');
   } catch(e) { showToast('❌ Upload failed'); }
 };
@@ -3984,19 +4610,17 @@ window.addCrossPhotos = async function(crossId, input) {
 window.recordOffspring = function(crossId) {
   const c = crosses.find(x => x.id === crossId);
   if (!c) return;
-  closeCrossesPanel();
+  switchMainTab('inventory');
   closeAlertPanel();
   openAddModal();
-  offspringCrossId = crossId;
   document.getElementById('modal-title').textContent = 'Record Offspring';
   document.getElementById('f-line').value = crossLabel(c);
   const parentTxt = c.incross ? `${c.parent1} (incross)` : `${c.parent1} × ${c.parent2}`;
   document.getElementById('f-notes').value = `Offspring of ${parentTxt}`;
   const inc = document.querySelector('input[name="status"][value="Incubator"]');
   if (inc) { inc.checked = true; syncStatusToLoc?.(); }
-  document.getElementById('save-add-another-btn')?.classList.remove('hidden');
-  const note = document.getElementById('offspring-cross-note');
-  if (note) { note.textContent = `🧬 Linking to cross: ${crossLabel(c)}`; note.classList.remove('hidden'); }
+  renderCrossOriginOptions(crossId);
+  window.onCrossOriginChange();
 };
 
 function prepNextOffspring() {
@@ -4015,10 +4639,18 @@ async function attachOffspringToCross(crossId, tankId) {
   const c = crosses.find(x => x.id === crossId);
   if (!c) return;
   if (!(c.offspring || []).includes(tankId)) c.offspring = [...(c.offspring || []), tankId];
-  c.status = 'completed';
   await saveCross(c);
   await dismissBreedingAlert(crossId);
   renderCrossBadge();
+  buildCrossesPanel();
+}
+
+async function detachOffspringFromCross(crossId, tankId) {
+  const c = crosses.find(x => x.id === crossId);
+  if (!c) return;
+  c.offspring = (c.offspring || []).filter(id => id !== tankId);
+  await saveCross(c);
+  buildCrossesPanel();
 }
 
 // ── Lineage section in the detail drawer ─────────────────────────────────────
@@ -4096,8 +4728,9 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
   if ((e.metaKey||e.ctrlKey) && e.key==='n') { e.preventDefault(); openAddModal(); return; }
   if (e.key==='Escape') {
-    closeExperimentsDropdown();
+    closeNavMenu();
+    document.getElementById('group-assign-menu')?.classList.add('hidden');
     if (!document.getElementById('tank-picker-overlay')?.classList.contains('hidden')) closeTankPicker();
-    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); closeAlertPanel(); closeCrossesPanel(); closeNewCross();
+    closeModal(); closeDrawer(); closeScanner(); closeLightbox(); closeMobileFilters(); closeGuide(); closeAlertPanel(); closeActivityPanel(); closeNewCross();
   }
 });

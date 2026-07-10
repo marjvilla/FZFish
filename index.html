@@ -87,7 +87,8 @@
         </div>
         <div class="form-group">
           <label>Date of Fertilization</label>
-          <input id="f-age" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off" maxlength="10" oninput="autoFormatDate(this)" />
+          <input id="f-age" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off" maxlength="10" oninput="autoFormatDate(this);validateAgeInput()" onblur="validateAgeInput()" />
+          <p class="field-note" id="f-age-hint" style="display:none">⚠️ Enter a complete, valid date (MM/DD/YYYY).</p>
         </div>
         <div class="form-group">
           <label>Count</label>
@@ -201,6 +202,13 @@
             <span>🔔 Remind me to remove mesh baffles in 7 days</span>
           </label>
         </div>
+        <div class="form-group full-width">
+          <label>🧬 Lineage — offspring of cross</label>
+          <select id="f-cross-origin" onchange="onCrossOriginChange()">
+            <option value="">— Not linked to a cross —</option>
+          </select>
+          <p class="field-note field-note-info">Link this tank to a breeding cross to show it as offspring in the Lineage tab and the parent tanks' ancestry tree.</p>
+        </div>
       </div>
       <div class="offspring-cross-note hidden" id="offspring-cross-note"></div>
       <div class="modal-actions">
@@ -209,6 +217,19 @@
         <button type="submit" class="btn-primary" id="save-btn">Save Tank</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ── Duplicate Tank ID dialog ── -->
+<div id="dup-id-overlay" class="overlay">
+  <div class="modal-card dup-id-card">
+    <h2>⚠️ Duplicate Tank ID</h2>
+    <p class="field-note" id="dup-id-message"></p>
+    <p class="field-note">You can save it anyway with a numbered suffix and get reminded to fix it in 7 days, or cancel and pick a different ID.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn-ghost" onclick="resolveDupId('cancel')">Cancel</button>
+      <button type="button" class="btn-primary" id="dup-id-confirm-btn" onclick="resolveDupId('suffix')">Save anyway</button>
+    </div>
   </div>
 </div>
 
@@ -231,14 +252,23 @@
 
   <!-- Header -->
   <header class="app-header">
-    <div class="header-left" onclick="openGuide()" title="Quick Start Guide" style="cursor:pointer">
+    <div class="header-left nav-wrap" id="nav-wrap" onclick="toggleNavMenu(event)" title="Menu">
       <span class="logo-icon">🐟</span>
       <span class="logo-text">FZFish</span>
+      <span class="nav-caret">▾</span>
+      <div id="nav-dropdown" class="nav-dropdown hidden">
+        <button class="nav-item active" id="nav-inventory" onclick="event.stopPropagation();switchMainTab('inventory');closeNavMenu()">🐠 Inventory</button>
+        <button class="nav-item" id="nav-lineage" onclick="event.stopPropagation();switchMainTab('lineage');closeNavMenu()">🔀 Breeding &amp; Lineage</button>
+        <button class="nav-item" id="nav-experiments" onclick="event.stopPropagation();switchMainTab('experiments');closeNavMenu()">🧪 Experiments</button>
+        <div class="nav-divider"></div>
+        <button class="nav-item" onclick="event.stopPropagation();openActivityPanel();closeNavMenu()">📜 Recent Activity</button>
+        <button class="nav-item" onclick="event.stopPropagation();openGuide();closeNavMenu()">📖 Help Guide</button>
+      </div>
     </div>
     <div class="header-center">
       <div class="search-wrap">
         <span class="search-icon">⌕</span>
-        <input id="search-input" type="text" placeholder="Search…" oninput="filterFish()" onchange="filterFish()" />
+        <input id="search-input" type="text" placeholder="Search line, ID, location… (try line:fli1)" title="Prefixes: line:  id:  notes:  loc:  marker:  status:" oninput="filterFish()" onchange="filterFish()" />
         <div class="search-fields-wrap">
           <button id="search-fields-btn" class="search-fields-btn" onclick="toggleSearchFieldsDd(event)">Fields ▾</button>
           <div id="search-fields-dd" class="search-fields-dd hidden"></div>
@@ -249,18 +279,6 @@
       <button class="icon-btn" onclick="openScanner()" title="Scan barcode">📷</button>
       <button class="icon-btn" onclick="syncSheets()" title="Sync" id="sync-btn">⟳</button>
       <button class="icon-btn alert-btn" id="alert-btn" onclick="openAlertPanel()" title="Alerts">🔔</button>
-      <button class="icon-btn alert-btn" id="crosses-btn" onclick="openCrossesPanel()" title="Breeding & Lineage">🔀</button>
-      <!-- Experiments -->
-      <div class="exp-btn-wrap">
-        <button class="btn-exp" id="experiments-btn" onclick="toggleExperimentsDropdown()">🧪 ▾</button>
-        <div id="experiments-dropdown" class="exp-dropdown hidden">
-          <div class="exp-dd-header">
-            <span class="exp-dd-title">Experiments</span>
-            <button class="exp-dd-new" onclick="createExperiment()">+ New</button>
-          </div>
-          <div id="experiments-list"></div>
-        </div>
-      </div>
       <button class="btn-primary add-btn" onclick="openAddModal()">+ Add Tank</button>
       <button class="btn-signout" id="signout-btn" onclick="signOut()">Sign Out</button>
     </div>
@@ -270,21 +288,33 @@
   <div id="experiment-bar" class="experiment-bar hidden">
     <div class="exp-bar-left">
       <span class="exp-bar-label">🧪</span>
-      <span id="exp-name-display" class="exp-bar-name"></span>
+      <span id="exp-name-display" class="exp-bar-name copy-field" onclick="copyToClip(currentExperiment?.name, 'Experiment name')" title="Click to copy"></span>
       <input id="exp-name-input" class="exp-bar-input hidden" type="text"
         onblur="saveRenameExp()" onkeydown="if(event.key==='Enter')saveRenameExp()" />
       <button class="exp-bar-rename-btn" onclick="startRenameExp()" title="Rename">✏️</button>
+      <button id="exp-date-pill" class="exp-notes-tab" onclick="startEditExpDate()" title="Set a date for this experiment">📅 Set date</button>
+      <input id="exp-date-input" class="exp-bar-input hidden" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" maxlength="10"
+        oninput="autoFormatDate(this)" onblur="saveExpDateFromInput()" onkeydown="if(event.key==='Enter')saveExpDateFromInput()" />
       <button id="exp-notes-toggle-btn" class="exp-notes-tab" onclick="toggleExpNotes()" title="Notes">📝 Notes</button>
     </div>
     <div class="exp-bar-right">
       <button class="btn-exp-action" onclick="enterSelectionModeForExperiment()">＋ Add Tanks</button>
-      <button id="group-color-btn" class="btn-exp-action" onclick="toggleGroupByColor()" title="Group cards by color">⬤ Group</button>
-      <div class="exp-group-btns" title="Assign group color to selected tanks">
-        <button class="exp-group-swatch swatch-green"  onclick="enterSelectionModeForGroup('green')"  title="Green group">●</button>
-        <button class="exp-group-swatch swatch-red"    onclick="enterSelectionModeForGroup('red')"    title="Red group">●</button>
-        <button class="exp-group-swatch swatch-blue"   onclick="enterSelectionModeForGroup('blue')"   title="Blue group">●</button>
-        <button class="exp-group-swatch swatch-yellow" onclick="enterSelectionModeForGroup('yellow')" title="Yellow group">●</button>
-        <button class="exp-group-swatch swatch-none"   onclick="enterSelectionModeForGroup('none')"   title="Clear group">○</button>
+      <div class="exp-group-wrap">
+        <button id="group-color-btn" class="btn-exp-action" onclick="toggleGroupAssignMenu()" title="Add tanks to a group">⬤ Group</button>
+        <div id="group-assign-menu" class="group-assign-menu hidden">
+          <button class="group-assign-item" onclick="startGroupAssign('green')"><span class="exp-group-swatch swatch-green"></span>Green</button>
+          <button class="group-assign-item" onclick="startGroupAssign('red')"><span class="exp-group-swatch swatch-red"></span>Red</button>
+          <button class="group-assign-item" onclick="startGroupAssign('blue')"><span class="exp-group-swatch swatch-blue"></span>Blue</button>
+          <button class="group-assign-item" onclick="startGroupAssign('yellow')"><span class="exp-group-swatch swatch-yellow"></span>Yellow</button>
+          <button class="group-assign-item" onclick="startGroupAssign('none')"><span class="exp-group-swatch swatch-none">○</span>Remove from group</button>
+        </div>
+      </div>
+      <div class="exp-group-btns" title="Click a color to highlight that group">
+        <button class="exp-group-swatch swatch-green"  data-color="green"  onclick="toggleGroupFilter('green')"  title="Highlight Green group">●</button>
+        <button class="exp-group-swatch swatch-red"    data-color="red"    onclick="toggleGroupFilter('red')"    title="Highlight Red group">●</button>
+        <button class="exp-group-swatch swatch-blue"   data-color="blue"   onclick="toggleGroupFilter('blue')"   title="Highlight Blue group">●</button>
+        <button class="exp-group-swatch swatch-yellow" data-color="yellow" onclick="toggleGroupFilter('yellow')" title="Highlight Yellow group">●</button>
+        <button class="exp-group-swatch swatch-none"   data-color="none"   onclick="toggleGroupFilter('none')"   title="Highlight ungrouped tanks">○</button>
       </div>
       <button class="btn-exp-action danger" onclick="deleteExperiment()">Delete</button>
       <button class="btn-exp-close" onclick="exitExperiment()">✕ Exit</button>
@@ -304,8 +334,8 @@
     <div class="mini-stats-bar" id="mini-stats-bar"></div>
     <button id="mob-img-btn" class="mob-icon-btn" onclick="toggleImgMode()" title="Toggle photos">🖼</button>
     <button id="mob-sel-btn" class="mob-icon-btn" onclick="enterSelectionModeAuto()" title="Select tanks">☑</button>
+    <button id="mob-export-btn" class="mob-icon-btn" onclick="exportVisibleTanksCSV()" title="Export current view to CSV">⬇</button>
     <button id="mob-alert-btn" class="mob-icon-btn" onclick="openAlertPanel()" title="Alerts">🔔</button>
-    <button id="mob-crosses-btn" class="mob-icon-btn" onclick="openCrossesPanel()" title="Breeding & Lineage">🔀</button>
     <button class="filter-toggle-btn" onclick="openMobileFilters()">
       ⚙ Filters<span id="filter-active-count"></span>
     </button>
@@ -382,6 +412,7 @@
         <button id="reset-filters-btn" class="reset-filters-btn hidden" onclick="clearFilters()" title="Clear all filters">✕ Reset</button>
         <button id="img-toggle-btn" class="sort-dir-btn" onclick="toggleImgMode()" title="Toggle photos">🖼</button>
         <button id="sel-mode-btn" class="sort-dir-btn" onclick="enterSelectionModeAuto()" title="Select tanks">☑</button>
+        <button id="export-csv-btn" class="sort-dir-btn" onclick="exportVisibleTanksCSV()" title="Export current view to CSV">⬇</button>
         <select id="sort-select" onchange="sortFish()" class="sort-select">
           <option value="line">Line</option>
           <option value="age" selected>Fert. Date</option>
@@ -420,6 +451,21 @@
       <p>No tanks found!</p>
     </div>
   </main>
+
+  <!-- Breeding / Lineage tab view -->
+  <div id="lineage-view" class="lineage-view hidden">
+    <div class="lineage-search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="lineage-search-input" type="text" placeholder="Search a tank's ancestry by line or ID…" oninput="filterLineageSearch()" />
+    </div>
+    <div id="lineage-search-results" class="lineage-search-results hidden"></div>
+    <div class="lineage-body" id="crosses-panel-body"></div>
+  </div>
+
+  <!-- Experiments tab view -->
+  <div id="experiments-view" class="experiments-view hidden">
+    <div id="experiments-view-body"></div>
+  </div>
 
   <!-- FAB for mobile -->
   <button class="fab" onclick="openAddModal()">+</button>
@@ -533,12 +579,27 @@
       </details>
 
       <details class="guide-section">
+        <summary><h3>🧭 Navigation</h3></summary>
+        <p>Click the <strong>🐟 FZFish</strong> logo in the top-left to open the nav menu:</p>
+        <ul>
+          <li><strong>🐠 Inventory</strong> — the full tank list</li>
+          <li><strong>🔀 Breeding &amp; Lineage</strong> — set up and track breeding crosses, and search any tank's ancestry</li>
+          <li><strong>🧪 Experiments</strong> — create and open named tank groupings</li>
+          <li><strong>📜 Recent Activity</strong> — a read-only feed of every change made through the app (who, what, when)</li>
+          <li><strong>📖 Help Guide</strong> — this guide, plus the DPF calculator</li>
+        </ul>
+        <p>Only one section is shown at a time — switching to Inventory always shows the full, unfiltered list, even if you were inside an experiment.</p>
+      </details>
+
+      <details class="guide-section">
         <summary><h3>➕ Adding a Tank</h3></summary>
         <p>Click <strong>+ Add Tank</strong> (desktop) or the <strong>+</strong> button (bottom-right on mobile). You may also scan a new barcode to begin adding.</p>
         <ul>
           <li>Scan the barcode with 📷 (<em>the barcode text is in the bottom-left of the label</em>). Active tanks require a valid barcode ID — <strong>please attach barcodes as soon as possible</strong>.</li>
           <li>No barcode yet? Click the <strong>Split</strong> button under Tank ID to auto-assign a temporary SPL-ID. A 3-day alert will remind you to add a real barcode.</li>
           <li>Fill in the line name using <strong>A:b;C:D x Z</strong> formatting (<em>e.g. dbh:eGFP;CD4:mCherry x CD8:eGFP</em>).</li>
+          <li>The fertilization date must be a complete, valid <strong>MM/DD/YYYY</strong> date — incomplete or impossible dates (like Feb 30) are rejected on save.</li>
+          <li>If the Tank ID you enter is already in use, you'll be asked to either cancel and pick a different ID, or save anyway with a <strong>-1</strong>/<strong>-2</strong>/… suffix — this creates a 7-day alert reminding you to give it a proper unique ID.</li>
           <li>Input locations using <strong>Rx Sy</strong> or <strong>Nx Sy</strong> where R/N = rack or nursery, S = shelf counting up from the ground.</li>
           <li>In the Notes section, check <strong>🔔 Remind me to remove mesh baffles in 7 days</strong> if this tank is coming out of the nursery and needs baffle removal.</li>
         </ul>
@@ -583,13 +644,14 @@
           <li><strong>Edit</strong> — modify all fields. Changes sync to the Google Sheet immediately.</li>
           <li><strong>Duplicate</strong> — create a new pre-filled tank with the same line, markers, status, and location. Tank ID, photo, and notes are cleared so you can fill them in fresh.</li>
           <li><strong>Delete from Inventory</strong> — permanently removes the tank. <em>This can't be undone.</em></li>
+          <li>Click the <strong>Line name</strong>, <strong>Tank ID</strong>, or <strong>Location</strong> in the drawer to copy it to your clipboard (look for the ⎘ icon).</li>
         </ul>
-        <p><strong>If you move a tank, update its status and location in the inventory.</strong> All changes are also saved to a Changelog tab on the sheet.</p>
+        <p><strong>If you move a tank, update its status and location in the inventory.</strong> All changes are also saved to a Changelog tab on the sheet, viewable in-app under <strong>🐟 logo → 📜 Recent Activity</strong>.</p>
       </details>
 
       <details class="guide-section">
         <summary><h3>🔍 Searching &amp; Filtering</h3></summary>
-        <p>Use the search bar to find tanks. Use the status chips (<em>Active, Nursery, Incubator…</em>) to filter by status. Use the <strong>+Markers</strong> / <strong>−Markers</strong> / <strong>?Markers</strong> dropdowns to filter by confirmed presence, confirmed absence, or unsorted transgenes. On mobile, tap <strong>⚙ Filters</strong> to access all options.</p>
+        <p>Use the search bar to find tanks — by default, plain terms match line, Tank ID, and notes; open <strong>Fields ▾</strong> (desktop only) to also match location, markers, or status with plain terms, or just use a <code>loc:</code> / <code>marker:</code> / <code>status:</code> prefix below, which always works. Use the status chips (<em>Active, Nursery, Incubator…</em>) to filter by status. Use the <strong>+Markers</strong> / <strong>−Markers</strong> / <strong>?Markers</strong> dropdowns to filter by confirmed presence, confirmed absence, or unsorted transgenes. Click <strong>⬇ Export</strong> to download whatever's currently visible as a CSV — this respects your active filters, and exports just that experiment's tanks if you're inside one. On mobile, tap <strong>⚙ Filters</strong> to access all options.</p>
         <p><strong>Multi-term search:</strong> separate words are AND'd together — <code>fli1 cd4</code> returns only tanks matching both.</p>
         <p><strong>Field prefixes</strong> (desktop): use <code>field:value</code> to target a specific field regardless of the Fields selector. Available prefixes:</p>
         <ul style="font-family:var(--font-mono);font-size:.82rem;line-height:1.8">
@@ -615,16 +677,18 @@
 
       <details class="guide-section">
         <summary><h3>🧪 Experiments</h3></summary>
-        <p>Use <strong>🧪 ▾</strong> in the header to create or open an experiment. Experiments are named collections of tanks stored as separate tabs in the same Google Sheet — useful for grouping tanks by project or cross.</p>
+        <p>Open <strong>🐟 logo → 🧪 Experiments</strong> to see the list of named experiments and create new ones. Experiments are collections of tanks stored as separate tabs in the same Google Sheet — useful for grouping tanks by project or cross. The list always reloads fresh from the sheet when you open the tab, and each experiment's tank grid loads fresh when you open it, so neither view can go stale.</p>
         <ul>
-          <li>Click <strong>+ New</strong> to create an experiment.</li>
+          <li>Click <strong>+ New Experiment</strong> to create one.</li>
           <li>Click <strong>+ Add Tanks</strong> to enter selection mode — existing members are pre-selected. Confirm to save the new set.</li>
-          <li>Click <strong>⬤ Group</strong> to enter color-assignment mode. Choose a color (green, red, blue, yellow) then click tanks to assign them to that sub-group.</li>
-          <li>Toggle <strong>Group by Color</strong> in the experiment bar to sort cards by their assigned color, with color-coded section headers.</li>
-          <li>Rename an experiment by clicking ✏️ in the experiment bar.</li>
+          <li>Click <strong>⬤ Group</strong> to open a menu and add tanks to a color sub-group: choose a color (or "Remove from group"), then select the tanks to assign.</li>
+          <li>The colored dots on the bar next to <strong>⬤ Group</strong> are a view filter — click one to highlight (show only) that color's tanks, click it again to show everyone. This doesn't change any tank's group.</li>
+          <li>Rename an experiment by clicking ✏️ in the experiment bar; click the name itself (not the pencil) to copy it.</li>
+          <li>Click <strong>📅</strong> in the experiment bar to give the experiment a date — whatever you want it to mean (start date, target date, etc.). It also shows next to the tank count in the experiments list.</li>
           <li>Click <strong>📝</strong> in the experiment bar to add or edit free-form notes about the experiment. Notes save automatically when you click away from the text box, and the icon shows a dot when notes exist.</li>
+          <li>Click <strong>⬇ Export</strong> in the filter bar to download just this experiment's tanks as a CSV.</li>
           <li>Click <strong>Delete</strong> to permanently remove the experiment. <em>This can't be undone.</em></li>
-          <li>Click <strong>✕ Exit</strong> to return to the full inventory.</li>
+          <li>Click <strong>✕ Exit</strong> to return to the experiments list.</li>
           <li>You can also add or remove a tank from any experiment directly from its detail drawer.</li>
         </ul>
       </details>
@@ -637,13 +701,17 @@
           <li><strong>Nursery ID alert</strong> — triggered silently when you save a Nursery tank without a valid barcode ID. A 3-day reminder will appear to prompt you to scan one in. Also auto-dismisses when a real barcode is saved.</li>
           <li><strong>Baffle removal alert</strong> — check <strong>🔔 Remind me to remove mesh baffles in 7 days</strong> in the Notes section when saving a tank. A 7-day reminder will appear in the alert panel.</li>
           <li><strong>Breeding follow-up alert</strong> — created when you set up a cross in <strong>🔀 Breeding &amp; Lineage</strong>. Fires after the number of days you chose (default 7) and opens straight into the offspring recording flow.</li>
+          <li><strong>Duplicate Tank ID alert</strong> — created when you choose to save a tank anyway with a numbered suffix after entering an ID that's already in use. A 7-day reminder will appear to prompt you to give it a proper unique ID. Auto-dismisses once you edit the tank to a unique ID.</li>
         </ul>
         <p>From the alert panel you can <strong>Snooze</strong> any alert for 1 hour, or <strong>Dismiss</strong> it permanently. Deleting a tank also dismisses all its alerts.</p>
+        <p>Right after signing in, if anything needs attention you'll get a one-time toast broken down by type (e.g. <em>"3 alerts: 2 nursery barcode needed, 1 cross follow-up"</em>) so you don't have to open the panel just to check.</p>
+        <p><strong>Custom reminders:</strong> use <strong>+ New reminder</strong> at the bottom of the alert panel to add your own — give it a title and a date/time and it shows up alongside the automatic alerts.</p>
+        <p><strong>📅 Calendar Sync:</strong> every alert — automatic and custom — automatically gets a matching event on a shared <strong>FZFish Alerts</strong> calendar, titled with the email of whoever's account created it, with a popup reminder. Dismissing or snoozing an alert updates or removes its calendar event. This runs for whichever real account happens to be signed in — there's no personal switch to flip. Click <strong>📅 Subscribe to Alerts</strong> at the top of the alert panel to add that shared calendar to your own Google Calendar (a one-time, read-only opt-in — it doesn't change any permissions). <strong>Needs a one-time setup by an admin</strong> first (see the README's "Setting up Google Calendar Sync" section) — until then, alerts just won't show up on the calendar.</p>
       </details>
 
       <details class="guide-section">
         <summary><h3>🔀 Breeding &amp; Lineage</h3></summary>
-        <p>Click the <strong>🔀</strong> button in the header (or mobile toolbar) to open the Breeding &amp; Lineage panel — this is where you set up crosses, follow them through to offspring, and trace a tank's family tree.</p>
+        <p>Open <strong>🐟 logo → 🔀 Breeding &amp; Lineage</strong> — this is where you set up crosses, follow them through to offspring, and trace a tank's family tree.</p>
         <p><strong>Setting up a cross:</strong></p>
         <ul>
           <li>Click <strong>＋ New Cross</strong>, then pick <strong>Parent 1</strong> by scanning its barcode (📷) or choosing it from a searchable list (📋).</li>
@@ -651,6 +719,7 @@
           <li>Set the <strong>follow-up reminder</strong> — how many days until you're prompted to record offspring. Fully editable, default 7.</li>
           <li>Optionally attach <strong>setup photos</strong> of the breeding tank and add notes. This is just a snapshot of the day, not a permanent record — photos are <strong>automatically deleted after 3 days</strong>.</li>
           <li>Both parent tanks are automatically switched to <strong>Breeding</strong> status so they show up together in the inventory.</li>
+          <li>Each cross card shows its Cross ID next to the setup date — click it to copy (⎘).</li>
         </ul>
         <p><strong>Recording offspring:</strong></p>
         <ul>
@@ -667,6 +736,7 @@
           <li><strong>Cancel</strong> — abandon the cross. <em>This can't be undone</em>; any setup photos are deleted.</li>
         </ul>
         <p><strong>Lineage:</strong> every tank's detail drawer has a <strong>🧬 Lineage</strong> section showing what it was bred from, any crosses it's been a parent in with their recorded offspring, and an expandable multi-generation ancestry tree. Use <strong>🔀 Start cross from this tank</strong> in the drawer to jump into New Cross with that tank pre-filled as Parent 1.</p>
+        <p>You can also set or change which cross a tank is offspring of directly from the <strong>Add/Edit Tank</strong> form — a <strong>🧬 Lineage</strong> dropdown lets you link it to any existing cross (or unlink it), independent of the Record Offspring flow. Handy for correcting a tank's lineage after the fact.</p>
       </details>
 
       <details class="guide-section">
@@ -742,20 +812,32 @@
   <div class="alert-card">
     <div class="alert-card-header">
       <span>🔔 Alerts</span>
-      <button class="close-btn" onclick="closeAlertPanel()">✕</button>
+      <div class="alert-header-actions">
+        <button id="cal-sync-toggle" class="cal-sync-btn" onclick="subscribeToAlertsCalendar()" title="Add the shared FZFish Alerts calendar to your own Google Calendar">📅 Subscribe to Alerts</button>
+        <button class="close-btn" onclick="closeAlertPanel()">✕</button>
+      </div>
     </div>
     <div class="alert-card-body" id="alert-panel-body"></div>
+    <div class="alert-reminder-footer">
+      <p class="field-note field-note-info">+ New reminder — automatically synced to the shared Alerts Calendar</p>
+      <div class="alert-reminder-row">
+        <input type="text" id="custom-reminder-title" placeholder="Reminder title" />
+        <input type="text" id="custom-reminder-date" inputmode="numeric" placeholder="MM/DD/YYYY" maxlength="10" oninput="autoFormatDate(this)" />
+        <input type="time" id="custom-reminder-time" />
+        <button class="btn-xs btn-primary" onclick="addCustomReminder()">+ Add</button>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- ── Breeding / Lineage panel ── -->
-<div id="crosses-overlay" class="overlay" onclick="if(event.target===this)closeCrossesPanel()">
+<!-- ── Recent Activity (read-only changelog) ── -->
+<div id="activity-overlay" class="overlay" onclick="if(event.target===this)closeActivityPanel()">
   <div class="alert-card">
     <div class="alert-card-header">
-      <span>🔀 Breeding &amp; Lineage</span>
-      <button class="close-btn" onclick="closeCrossesPanel()">✕</button>
+      <span>📜 Recent Activity</span>
+      <button class="close-btn" onclick="closeActivityPanel()">✕</button>
     </div>
-    <div class="alert-card-body" id="crosses-panel-body"></div>
+    <div class="alert-card-body" id="activity-panel-body"></div>
   </div>
 </div>
 
