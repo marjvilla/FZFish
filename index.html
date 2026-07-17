@@ -716,15 +716,16 @@
         <ul>
           <li>Click <strong>＋ New Cross</strong>, then pick <strong>Parent 1</strong> by scanning its barcode (📷) or choosing it from a searchable list (📋).</li>
           <li>Toggle <strong>Incross</strong> to breed a single line against itself instead of picking a second parent.</li>
+          <li>Pick the <strong>fertilization date</strong> — Tomorrow (the stock default, since that's the day the eggs are actually fertilized), Today, or Custom for any other date. Fully editable later.</li>
           <li>Set the <strong>follow-up reminder</strong> — how many days until you're prompted to record offspring. Fully editable, default 7.</li>
-          <li>Optionally attach <strong>setup photos</strong> of the breeding tank and add notes. This is just a snapshot of the day, not a permanent record — photos are <strong>automatically deleted after 3 days</strong>.</li>
+          <li>Optionally attach <strong>setup photos</strong> of the breeding tank and add notes. This is just a snapshot of the day, not a permanent record — photos are <strong>automatically deleted 14 days after fertilization</strong>.</li>
           <li>Both parent tanks are automatically switched to <strong>Breeding</strong> status so they show up together in the inventory.</li>
           <li>Each cross card shows its Cross ID next to the setup date — click it to copy (⎘).</li>
         </ul>
         <p><strong>Recording offspring:</strong></p>
         <ul>
           <li>When the follow-up reminder fires, tap <strong>Record offspring</strong> from the alert or the cross card.</li>
-          <li>This opens the normal Add Tank form pre-filled with a suggested line name (<code>Parent1 × Parent2</code>, or <code>Line inx.</code> for an incross) — fully editable — and a note linking back to the parents.</li>
+          <li>This opens the normal Add Tank form pre-filled with a suggested line name (<code>Parent1 × Parent2</code>, or <code>Line inx.</code> for an incross) — fully editable — a note linking back to the parents, and the <strong>fertilization date</strong> pre-filled from the cross's own date.</li>
           <li>Use <strong>Save &amp; Add Another</strong> to log as many resulting tanks as you need from one cross; the form stays open and resets between saves.</li>
           <li>The cross is automatically marked <strong>completed</strong> once at least one offspring tank is recorded.</li>
         </ul>
@@ -818,15 +819,16 @@
       </div>
     </div>
     <div class="alert-card-body" id="alert-panel-body"></div>
-    <div class="alert-reminder-footer">
-      <p class="field-note field-note-info">+ New reminder — automatically synced to the shared Alerts Calendar</p>
+    <details class="alert-reminder-footer">
+      <summary>+ New reminder</summary>
+      <p class="field-note field-note-info">Automatically synced to the shared Alerts Calendar</p>
       <div class="alert-reminder-row">
         <input type="text" id="custom-reminder-title" placeholder="Reminder title" />
         <input type="text" id="custom-reminder-date" inputmode="numeric" placeholder="MM/DD/YYYY" maxlength="10" oninput="autoFormatDate(this)" />
         <input type="time" id="custom-reminder-time" />
         <button class="btn-xs btn-primary" onclick="addCustomReminder()">+ Add</button>
       </div>
-    </div>
+    </details>
   </div>
 </div>
 

@@ -36,6 +36,7 @@ let originalPhotoUrl  = null;
 let pendingPhotoFile  = null;
 let currentThumbPos   = '50% 15%';
 let editingId         = null;
+let drawerTankId      = null;  // internal id of the tank whose detail drawer is currently open, if any
 let demoMode          = false;
 let selectionMode     = false;
 let selectedTankIds   = new Set();
@@ -1498,27 +1499,55 @@ function logChange(action, record, details = '') {
 }
 
 // ── Google Drive ──────────────────────────────────────────────────────────────
-function compressPhoto(file) {
+const PHOTO_MAX_PX  = 1800;
+const PHOTO_QUALITY = 0.75;
+
+function fitPhotoDims(width, height) {
+  if (width > PHOTO_MAX_PX || height > PHOTO_MAX_PX) {
+    if (width >= height) { height = Math.round(height * PHOTO_MAX_PX / width); width = PHOTO_MAX_PX; }
+    else                 { width  = Math.round(width  * PHOTO_MAX_PX / height); height = PHOTO_MAX_PX; }
+  }
+  return { width, height };
+}
+
+// Plain <img>+<canvas> path — canvas.drawImage() draws raw pixel data and ignores
+// EXIF orientation, so this is only used as a fallback where createImageBitmap
+// with imageOrientation isn't supported.
+function compressPhotoFallback(file) {
   return new Promise((resolve) => {
-    const MAX_PX = 1800;
-    const QUALITY = 0.75;
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > MAX_PX || height > MAX_PX) {
-        if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX; }
-        else                 { width  = Math.round(width  * MAX_PX / height); height = MAX_PX; }
-      }
+      const { width, height } = fitPhotoDims(img.width, img.height);
       const canvas = document.createElement('canvas');
       canvas.width = width; canvas.height = height;
       canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-      canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', QUALITY);
+      canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', PHOTO_QUALITY);
     };
     img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
     img.src = url;
   });
+}
+
+// Photos straight off an Android camera commonly carry an EXIF rotation tag (portrait
+// shots stored as landscape pixels + "rotate 90°"). canvas.drawImage() on a plain <img>
+// ignores that tag, so a resized/compressed photo could come out sideways even though
+// the original preview looked fine. createImageBitmap's imageOrientation:'from-image'
+// bakes the correct rotation into the pixels before we ever touch a canvas.
+async function compressPhoto(file) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (e) {
+    return compressPhotoFallback(file);
+  }
+  const { width, height } = fitPhotoDims(bitmap.width, bitmap.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  return new Promise(resolve => canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', PHOTO_QUALITY));
 }
 
 async function uploadPhoto(file) {
@@ -1593,18 +1622,21 @@ function toDateInput(d) {
   const [y, m, day] = d.split('-');
   return m + '/' + day + '/' + y;
 }
-// Convert typed MM/DD/YYYY → YYYY-MM-DD for storage
+// A typed 2-digit year always means 20YY here — the app has no dates outside that range
+function expandYear(y) { return y.length === 2 ? String(2000 + (+y)) : y; }
+
+// Convert typed MM/DD/YYYY or MM/DD/YY → YYYY-MM-DD for storage
 function parseDateInput(v) {
   if (!v) return '';
-  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (!m) return v;
-  return m[3] + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+  return expandYear(m[3]) + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
 }
-// True only for a fully-formed, real MM/DD/YYYY calendar date (rejects 02/30/2024, 13/01/2024, etc.)
+// True only for a fully-formed, real MM/DD/YYYY (or MM/DD/YY) calendar date (rejects 02/30/2024, 13/01/2024, etc.)
 function isValidDateInput(v) {
-  const m = (v || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const m = (v || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (!m) return false;
-  const month = +m[1], day = +m[2], year = +m[3];
+  const month = +m[1], day = +m[2], year = +expandYear(m[3]);
   const d = new Date(year, month - 1, day);
   return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
 }
@@ -3211,6 +3243,7 @@ window.toggleTankInExperiment = async function(tankId, expIdx) {
 window.openDrawer = function(id) {
   const f = fishData.find(x => x.id === id);
   if (!f) return;
+  drawerTankId = f.id;
   const posHtml      = (f.markers    || []).length ? (f.markers   || []).map(m => `<span class="m-tag">${esc(m)}</span>`).join(' ')                  : '<span style="color:var(--text-dim)">None</span>';
   const negHtml      = (f.negMarkers || []).length ? (f.negMarkers|| []).map(m => `<span class="m-tag m-tag-neg">−${esc(m)}</span>`).join(' ')        : '<span style="color:var(--text-dim)">None</span>';
   const unsortedHtml = (f.unsorted   || []).length ? (f.unsorted  || []).map(m => `<span class="m-tag m-tag-unsorted">${esc(m)}</span>`).join(' ')     : '<span style="color:var(--text-muted);font-size:.85rem">—</span>';
@@ -3257,6 +3290,7 @@ window.openDrawer = function(id) {
         }).join('')}
       </div>
     </div>` : ''}
+    <div class="drawer-section" id="drawer-alerts-section"></div>
     <div class="drawer-actions">
       <button class="btn-ghost" onclick="closeDrawer();duplicateFish('${esc(f.id)}')">Duplicate</button>
       ${currentExperiment
@@ -3267,13 +3301,35 @@ window.openDrawer = function(id) {
   document.getElementById('detail-drawer').classList.add('open');
   document.getElementById('drawer-backdrop').classList.add('active');
   checkScrollLock();
+  renderDrawerAlerts(f.id);
 };
 
 window.closeDrawer = function() {
   document.getElementById('detail-drawer').classList.remove('open');
   document.getElementById('drawer-backdrop').classList.remove('active');
   checkScrollLock();
+  drawerTankId = null;
 };
+
+// Shows this tank's own active/upcoming alerts at the bottom of its detail drawer,
+// reusing the same alert-item markup/actions as the Alerts panel
+async function renderDrawerAlerts(tankInternalId) {
+  const wrap = document.getElementById('drawer-alerts-section');
+  if (!wrap) return;
+  const [active, upcoming] = await Promise.all([getActiveAlerts(), getUpcomingAlerts()]);
+  const mine = [...active, ...upcoming].filter(a => a.tankInternalId === tankInternalId);
+  if (!mine.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `<h4>🔔 Alerts</h4>` + mine.map(a => `
+    <div class="alert-item ${a.fireAt <= Date.now() ? 'alert-item-due' : 'alert-item-upcoming'}">
+      <div class="alert-item-msg">${alertMessage(a)}</div>
+      ${a.fireAt > Date.now() ? `<div class="alert-item-meta">Due ${formatAlertDate(a.fireAt)}</div>` : ''}
+      <div class="alert-item-actions">
+        ${a.fireAt <= Date.now() ? `<button class="btn-ghost btn-xs" onclick="snoozeAlert('${esc(a.id)}')">Snooze 1d</button>` : ''}
+        <button class="btn-ghost btn-xs" onclick="dismissAlert('${esc(a.id)}')">Dismiss</button>
+      </div>
+    </div>
+  `).join('');
+}
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────
 window.openLightbox = function(src) {
@@ -3600,8 +3656,11 @@ async function syncAllAlertsToCalendar() {
 
 async function createCalendarEvent(alert) {
   if (!calendarSyncEnabled()) return null;
-  const start   = new Date(alert.fireAt);
-  const end     = new Date(alert.fireAt + 30 * 60000);
+  const start = new Date(alert.fireAt);
+  // Alerts computed from a bare due-date land at local midnight — bump those to 9am
+  // so they don't show as an overnight event on the calendar.
+  if (start.getHours() === 0 && start.getMinutes() === 0) start.setHours(9, 0, 0, 0);
+  const end     = new Date(start.getTime() + 30 * 60000);
   const creator = currentUser || 'unknown user';
   try {
     const res = await authFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GCAL_ID)}/events`, {
@@ -3686,6 +3745,7 @@ window.dismissAlert = async function(id) {
   await saveAlerts(updated);
   renderAlertBadge();
   buildAlertPanel();
+  if (drawerTankId) renderDrawerAlerts(drawerTankId);
 };
 
 async function dismissAlertsForTank(tankInternalId, type) {
@@ -3706,10 +3766,10 @@ async function dismissAlertsForTank(tankInternalId, type) {
 window.snoozeAlert = async function(id) {
   const alerts  = await loadAlerts();
   const target  = alerts.find(a => a.id === id);
-  const snoozedUntil = Date.now() + 60 * 60 * 1000;
+  const snoozedUntil = Date.now() + 24 * 60 * 60 * 1000;
   let calendarEventId = target?.calendarEventId || null;
   if (calendarEventId) {
-    // Re-create the event at the new time rather than leaving a stale one an hour early
+    // Re-create the event at the new time rather than leaving a stale one a day early
     await deleteCalendarEvent(calendarEventId);
     calendarEventId = calendarSyncEnabled() ? await createCalendarEvent({ ...target, fireAt: snoozedUntil }) : null;
   }
@@ -3717,6 +3777,7 @@ window.snoozeAlert = async function(id) {
   await saveAlerts(updated);
   renderAlertBadge();
   buildAlertPanel();
+  if (drawerTankId) renderDrawerAlerts(drawerTankId);
 };
 
 async function getActiveAlerts() {
@@ -3920,7 +3981,7 @@ async function buildAlertPanel() {
         <div class="alert-item-msg">${alertMessage(a)}</div>
         <div class="alert-item-actions">
           ${action}
-          <button class="btn-ghost btn-xs" onclick="snoozeAlert('${esc(a.id)}')">Snooze 1h</button>
+          <button class="btn-ghost btn-xs" onclick="snoozeAlert('${esc(a.id)}')">Snooze 1d</button>
           <button class="btn-ghost btn-xs" onclick="dismissAlert('${esc(a.id)}')">Dismiss</button>
         </div>
       </div>`;
@@ -4260,6 +4321,10 @@ function buildCrossesPanel() {
 let crossChoosingSlot  = 0;
 let editingCrossId     = null;   // null = creating; id = editing an existing cross
 let removedCrossPhotos = [];      // existing photo URLs to delete from Drive on save
+let newCrossDate       = null;    // YYYY-MM-DD — the fertilization date for this cross
+let crossDateMode      = 'tomorrow'; // 'tomorrow' | 'today' | 'custom'
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function setCrossModalMode(editing) {
   const title = document.querySelector('#new-cross-overlay h2');
@@ -4275,6 +4340,9 @@ window.openNewCross = function(prefillParent1) {
   newCrossPhotos     = [];
   removedCrossPhotos = [];
   crossChoosingSlot  = 0;
+  // Stock default is tomorrow — that's the day the eggs are actually fertilized
+  crossDateMode      = 'tomorrow';
+  newCrossDate       = addDays(todayStr(), 1);
   setCrossModalMode(false);
   document.getElementById('new-cross-overlay').classList.add('active');
   checkScrollLock();
@@ -4290,6 +4358,9 @@ window.openEditCross = function(crossId) {
   newCrossPhotos     = (c.photos || []).map(url => ({ url, existing: true }));
   removedCrossPhotos = [];
   crossChoosingSlot  = 0;
+  newCrossDate  = c.date || todayStr();
+  crossDateMode = newCrossDate === addDays(todayStr(), 1) ? 'tomorrow'
+                : newCrossDate === todayStr() ? 'today' : 'custom';
   setCrossModalMode(true);
   document.getElementById('new-cross-overlay').classList.add('active');
   checkScrollLock();
@@ -4352,11 +4423,22 @@ function renderNewCrossModal() {
     </label>
     ${crossParentSlotHtml(2)}
     <div class="cross-field">
+      <label>Fertilization date</label>
+      <div class="cross-date-btns">
+        <button type="button" class="btn-xs ${crossDateMode === 'tomorrow' ? 'btn-primary' : 'btn-ghost'}" onclick="setCrossDateMode('tomorrow')">Tomorrow</button>
+        <button type="button" class="btn-xs ${crossDateMode === 'today' ? 'btn-primary' : 'btn-ghost'}" onclick="setCrossDateMode('today')">Today</button>
+        <button type="button" class="btn-xs ${crossDateMode === 'custom' ? 'btn-primary' : 'btn-ghost'}" onclick="setCrossDateMode('custom')">Custom</button>
+      </div>
+      ${crossDateMode === 'custom'
+        ? `<input type="text" id="new-cross-date-custom" inputmode="numeric" placeholder="MM/DD/YYYY" maxlength="10" value="${esc(toDateInput(newCrossDate))}" oninput="autoFormatDate(this)" />`
+        : `<p class="field-note">${esc(formatDate(newCrossDate))}</p>`}
+    </div>
+    <div class="cross-field">
       <label>Follow-up reminder (days)</label>
       <input type="number" id="new-cross-days" min="1" value="7" class="cross-num-input">
     </div>
     <div class="cross-field">
-      <label>Setup photos <span class="field-note">auto-removed after 3 days</span></label>
+      <label>Setup photos <span class="field-note">auto-removed 14 days after fertilization</span></label>
       <div class="cross-photo-grid">
         ${photos}
         <label class="cross-photo-add">＋<input type="file" accept="image/*" multiple hidden onchange="addNewCrossPhotos(this)"></label>
@@ -4416,6 +4498,14 @@ window.toggleNewCrossIncross = function(on) {
   renderNewCrossModal();
 };
 
+window.setCrossDateMode = function(mode) {
+  crossDateMode = mode;
+  if (mode === 'tomorrow') newCrossDate = addDays(todayStr(), 1);
+  else if (mode === 'today') newCrossDate = todayStr();
+  // 'custom' — leave newCrossDate as-is; the custom input reads/validates at save time
+  renderNewCrossModal();
+};
+
 window.openScannerForCross = function(slot) {
   scanForCross = slot;
   document.getElementById('scan-overlay').classList.add('active');
@@ -4455,7 +4545,17 @@ window.saveNewCross = async function() {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   const days  = parseInt(document.getElementById('new-cross-days')?.value) || 7;
   const notes = document.getElementById('new-cross-notes')?.value.trim() || '';
-  const today = new Date().toISOString().slice(0, 10);
+
+  let crossDate = newCrossDate;
+  if (crossDateMode === 'custom') {
+    const raw = document.getElementById('new-cross-date-custom')?.value.trim() || '';
+    if (!isValidDateInput(raw)) {
+      showToast('⚠️ Enter a valid fertilization date (MM/DD/YYYY)');
+      if (btn) { btn.disabled = false; btn.textContent = origText; }
+      return;
+    }
+    crossDate = parseDateInput(raw);
+  }
 
   // Delete any existing photos the user removed
   let failedRemovals = 0;
@@ -4486,10 +4586,11 @@ window.saveNewCross = async function() {
     c.parent1      = p1;
     c.parent2      = newCrossIncross ? '' : p2;
     c.incross      = newCrossIncross;
+    c.date         = crossDate;
     c.followupDays = days;
     c.notes        = notes;
     c.photos       = photos;
-    c.photoExpires = photos.length ? (c.photoExpires || addDays(c.date, 3)) : '';
+    c.photoExpires = photos.length ? addDays(crossDate, 14) : '';
     try { await saveCross(c); }
     catch(e) { showToast('❌ ' + e.message); if (btn) { btn.disabled = false; btn.textContent = origText; } return; }
     // Refresh the follow-up alert since label/timing may have changed
@@ -4513,14 +4614,14 @@ window.saveNewCross = async function() {
   // ── Create path ──
   const cross = {
     id: 'CROSS-' + Date.now(),
-    date: today,
+    date: crossDate,
     parent1: p1,
     parent2: newCrossIncross ? '' : p2,
     incross: newCrossIncross,
     followupDays: days,
     status: 'active',
     photos,
-    photoExpires: photos.length ? addDays(today, 3) : '',
+    photoExpires: photos.length ? addDays(crossDate, 14) : '',
     notes,
     offspring: [],
     _rowIndex: null,
@@ -4598,7 +4699,7 @@ window.addCrossPhotos = async function(crossId, input) {
       const url = demoMode ? URL.createObjectURL(file) : await uploadPhoto(file);
       c.photos = [...(c.photos || []), url];
     }
-    if (!c.photoExpires) c.photoExpires = addDays(c.date, 3);
+    if (!c.photoExpires) c.photoExpires = addDays(c.date, 14);
     await saveCross(c);
     buildCrossesPanel();
     logChange('Cross Photo Added', { tankId: c.id, line: crossLabel(c) }, `${files.length} photo${files.length > 1 ? 's' : ''}`);
@@ -4617,6 +4718,10 @@ window.recordOffspring = function(crossId) {
   document.getElementById('f-line').value = crossLabel(c);
   const parentTxt = c.incross ? `${c.parent1} (incross)` : `${c.parent1} × ${c.parent2}`;
   document.getElementById('f-notes').value = `Offspring of ${parentTxt}`;
+  if (c.date) {
+    document.getElementById('f-age').value = toDateInput(c.date);
+    validateAgeInput();
+  }
   const inc = document.querySelector('input[name="status"][value="Incubator"]');
   if (inc) { inc.checked = true; syncStatusToLoc?.(); }
   renderCrossOriginOptions(crossId);

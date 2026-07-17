@@ -212,8 +212,9 @@ Click **＋ New Cross**, then:
 
 - Pick **Parent 1** by scanning its barcode (📷) or choosing it from a searchable list (📋)
 - Toggle **Incross** to breed a single line against itself instead of picking a second parent
+- Pick the **fertilization date** — three buttons: **Tomorrow** (the stock default, since that's the day the eggs are actually fertilized), **Today**, or **Custom** for any other date. Fully editable later via **Edit**.
 - Set the **follow-up reminder** — how many days until you're prompted to record offspring (default 7, fully editable)
-- Optionally attach **setup photos** of the breeding tank and add notes — this is just a snapshot of the day, not a permanent record; photos are **automatically deleted after 3 days**
+- Optionally attach **setup photos** of the breeding tank and add notes — this is just a snapshot of the day, not a permanent record; photos are **automatically deleted 14 days after fertilization**
 - Both parent tanks are automatically set to **Breeding** status so they show up together in that section of the inventory
 - Each cross card shows its Cross ID next to the setup date — click it to copy (⎘), handy for referencing a specific cross elsewhere
 
@@ -223,6 +224,7 @@ When the follow-up reminder fires (from the alert panel or the cross card itself
 
 - A suggested line name (`Parent1 × Parent2`, or `Line inx.` for an incross) — **fully editable**
 - A note linking back to the parent tanks
+- The **fertilization date**, pre-filled from the cross's own date — **fully editable**
 
 Use **Save & Add Another** to log as many resulting tanks as you need from a single cross (e.g. splitting offspring across multiple tanks) — the form stays open and resets between saves. The cross is automatically marked **completed** once at least one offspring tank is recorded.
 
